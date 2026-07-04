@@ -1,4 +1,4 @@
-#+title: singdile 的 Emacs 配置
+ #+title: singdile 的 Emacs 配置
 #+author: singdile
 #+startup: overview indent
 #+property: header-args:emacs-lisp  :tangle yes :results silent
@@ -40,6 +40,38 @@ Emacs 内置了 =package.el=，只需指定从哪里下载包。
         ("nongnu" . "https://elpa.nongnu.org/nongnu/")
         ("melpa"  . "https://melpa.org/packages/")))
 (package-initialize)
+;; 确保 Emacs 能找到 Go 工具链（从桌面启动时 PATH 不完整）
+(use-package exec-path-from-shell
+  :ensure t
+  :config
+  (setq exec-path-from-shell-variables '("PATH" "MANPATH" "GOPATH" "GOMODCACHE"))
+  (exec-path-from-shell-initialize))
+#+end_src
+
+** 垃圾回收优化（GC）
+
+Emacs 默认的 GC 阈值只有 80KB，写代码时频繁触发垃圾回收会导致卡顿。
+使用 =gcmh= 包动态管理：打字时不 GC，空闲时才悄悄回收。
+
+| 设置 | 值 | 作用 |
+|------|-----|------|
+| =gc-cons-threshold= | 1GB | 开发期间几乎不 GC |
+| =gcmh-high-cons-threshold= | 1GB | 打字时保持高阈值 |
+| =gcmh-low-cons-threshold= | 200MB | 空闲时降到 200MB 触发清理 |
+| =gcmh-idle-delay= | 15秒 | 停手 15 秒后才开始 GC |
+
+#+begin_src emacs-lisp
+;; 启动时设置高阈值，避免初始化期间的 GC
+(setq gc-cons-threshold (* 1024 1024 1024))  ; 1GB
+
+(use-package gcmh
+  :ensure t
+  :custom
+  (gcmh-high-cons-threshold (* 1024 1024 1024))  ; 打字时 1GB
+  (gcmh-low-cons-threshold (* 200 1024 1024))    ; 空闲时 200MB（清理更轻量）
+  (gcmh-idle-delay 15)                           ; 空闲 15 秒后才开始 GC
+  :init
+  (gcmh-mode 1))
 #+end_src
 
 ** use-package
@@ -72,6 +104,25 @@ Emacs 的 =M-x customize= 界面会把设置自动写入 =custom-file=。
 (setq custom-file (expand-file-name "custom.el" user-emacs-directory))
 (when (file-exists-p custom-file)
   (load custom-file))
+#+end_src
+
+** 网络代理
+
+Emacs 的网络请求（如下载包、eglot 连接服务器）可能需要通过代理访问。
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| http | 127.0.0.1:7890 | HTTP 代理地址 |
+| https | 127.0.0.1:7890 | HTTPS 代理地址 |
+| no_proxy | .cn, localhost | 不走代理的地址 |
+
+#+begin_src emacs-lisp
+(use-package url
+  :config
+  (setq url-proxy-services
+        '(("http" . "127.0.0.1:7890")
+          ("https" . "127.0.0.1:7890")
+          ("no_proxy" . "^.*\\.cn\\|localhost\\|127\\.0\\.0\\.1"))))
 #+end_src
 
 * 基础界面
@@ -127,6 +178,26 @@ Emacs 默认显示工具栏、菜单栏、滚动条——这些在 GUI 下可以
 (set-fringe-mode 10)        ; Give some breathing room
 (menu-bar-mode -1)          ; Disable the menu bar
 (setq visible-bell t)       ; Set up the visible bell
+(setq inhibit-startup-screen t)        ; 跳过欢迎界面，直接进 scratch
+(setq initial-scratch-message
+      ";; Welcome singdile, let's do something.\n\n")
+;; 解绑 C-\：系统级 fcitx5 用 C-\ 切换输入法，
+;; Emacs 默认也绑了 C-\ 到 toggle-input-method，两者冲突。
+;; 这里让 Emacs 让路，交给 fcitx5 处理。
+(global-unset-key (kbd "C-\\"))
+;; breadcrumb：顶部文件路径导航（eglot 同作者）
+(use-package breadcrumb
+  :ensure t
+  :config
+  (breadcrumb-mode 1)
+  ;; 去掉边框和背景色，低调融入
+  ;; 用 :inherit default 代替 (face-background 'default)
+  ;; 前者在终端帧创建时能正常解析，后者在 daemon 启动时返回 "unspecified-bg"
+  (set-face-attribute 'header-line nil
+                      :box nil
+                      :inherit 'default
+                      :foreground "#7a7a7a"
+                      :height 0.9))
 #+end_src
 
 * 编辑增强
@@ -282,8 +353,6 @@ vertico 不会报错而是灰显输入，让你直接回车创建新文件。
 #+begin_src emacs-lisp
 (use-package corfu
   :ensure t
-  ;; emacs -nw 下需要 corfu-terminal 来正常显示
-  :if (display-graphic-p)
   :custom
   (corfu-auto t)                  ; 自动弹出补全
   (corfu-auto-prefix 2)           ; 输入 2 个字符后就弹出
@@ -361,7 +430,21 @@ Emacs 内置了 =electric-pair-mode= ，输入左括号自动补右括号。
   :bind (("C-h f" . helpful-callable)   ; 函数/宏
          ("C-h v" . helpful-variable)   ; 变量
          ("C-h k" . helpful-key)        ; 快捷键
-         ("C-h x" . helpful-command)))  ; 交互命令
+         ("C-h x" . helpful-command)    ; 交互命令
+         ("C-h q" . my/close-help-window)))  ; 关闭帮助窗口
+
+;; 关闭帮助窗口而不影响其他窗口
+;; 问题：C-x 1 会关闭所有其他窗口，C-x 0 需要移动光标
+;; 解决：一键关闭帮助窗口，光标保持在原位置
+(defun my/close-help-window ()
+  "关闭帮助窗口，不影响其他窗口布局。"
+  (interactive)
+  (dolist (buf (buffer-list))
+    (when (and (buffer-live-p buf)
+               (with-current-buffer buf
+                 (derived-mode-p 'help-mode 'helpful-mode 'Info-mode)))
+      (when-let ((win (get-buffer-window buf)))
+        (quit-window nil win)))))
 #+end_src
 
 ** rainbow-delimiters：括号彩虹色
@@ -610,6 +693,82 @@ Org 模式是 Emacs 的杀手级功能：笔记、TODO、日程、文学编程�
   (setq org-image-actual-width '(600)) ; 内联图片最大宽度 600px
 #+end_src
 
+** Agenda 显示优化
+
+leuven-dark 主题默认将 agenda 的日期标题设为 1.6 倍字号
+（=leuven-dark-scale-org-agenda-structure= 控制）。在周视图中，
+当天的标题（蓝色底 + 大字）显得特别大而下面的任务项显得特别小，
+比例失调。
+
+下面从字号、网格、排序三个方向优化。
+
+| 参数 | 作用 | 推荐值 |
+|------|------|--------|
+| 日期字号 | 从 1.6x 降到 1.2x，保持主题颜色 | =:height 1.2= |
+| 区块标题 | =Agenda= / =Upcoming= 等段首文字 | =:height 1.15= |
+| =org-agenda-prefix-format= | 每项前面显示分类、时间 | =%-12:c%= 分类 + =%-12t= 时间 |
+| =org-agenda-time-grid= | 小时网格 + 当前时间指示 | 8:00-18:00 / =◀-- now= |
+| =org-agenda-skip-*-if-done= | 已完成的不再显示在 deadline/scheduled 区 | =t= |
+
+#+begin_src emacs-lisp
+  ;; ---------- Agenda 显示优化 ----------
+
+  ;; 1. 日期字号缩放到 1.2x（leuven 默认 1.6x 偏大）
+  (dolist (face '(org-agenda-date org-agenda-date-today org-agenda-date-weekend))
+    (set-face-attribute face nil :height 1.2))
+  (set-face-attribute 'org-agenda-structure nil :height 1.15)
+
+  ;; 2. 每项的显示格式
+  ;;   %i = 缩进  %-12:c = 分类（左对齐 12 字符宽）
+  ;;   %-12t = 时间  %s = 任务文本
+  (setq org-agenda-prefix-format
+        '((agenda . " %i %-12:c%?-12t% s")
+          (todo   . " %i %-12:c")
+          (tags   . " %i %-12:c")
+          (search . " %i %-12:c")))
+
+  ;; 3. 时间网格
+  ;;   每天显示 8:00~18:00 的虚线网格，当前时间用箭头指示
+  (setq org-agenda-current-time-string "◀-- now 现在")
+  (setq org-agenda-time-grid
+        '((daily today remove-match)
+          (800 1000 1200 1400 1600 1800)
+          " ╴" "╴╴╴╴╴╴╴╴╴╴╴╴╴╴╴╴╴╴╴╴╴╴╴╴╴╴╴╴╴╴"))
+
+  ;; 4. 区块分隔线
+  (setq org-agenda-block-separator "─")
+
+  ;; 5. 标签右对齐（负值表示右边缘到第 80 列，CJK 需要更宽）
+  (setq org-agenda-tags-column -80)
+
+  ;; 6. 已完成的任务不再出现在 deadline/scheduled 区
+  (setq org-agenda-skip-deadline-if-done t)
+  (setq org-agenda-skip-scheduled-if-done t)
+  (setq org-agenda-skip-timestamp-if-done t)
+
+  ;; 7. 子任务被阻塞时显示为暗淡
+  (setq org-agenda-dim-blocked-tasks t)
+
+  ;; 8. 排序：习惯优先 → 时间先后 → 优先级 → 分类
+  (setq org-agenda-sorting-strategy
+        '((agenda habit-down time-up user-defined-up priority-down category-keep)
+          (todo   priority-down category-keep)
+          (tags   priority-down category-keep)
+          (search category-keep)))
+
+  ;; 9. 窗口：在当前窗口打开，退出时恢复原样
+  (setq org-agenda-window-setup 'current-window)
+  (setq org-agenda-restore-windows-after-quit t)
+
+  ;; 10. 默认视图：从今天开始的 7 天（不固定从周一开始）
+  (setq org-agenda-start-on-weekday nil)
+  (setq org-agenda-span 7)
+  (setq org-agenda-start-day nil)
+
+  ;; 11. 在 agenda 里用 C-c C-t 改状态时自动记日志
+  (setq org-agenda-log-mode-items '(closed clock state))
+#+end_src
+
 ** 标题字号
 
 Org 默认所有层级的标题字号一样，只靠颜色和缩进区分。
@@ -620,10 +779,10 @@ Org 默认所有层级的标题字号一样，只靠颜色和缩进区分。
 只改高度。
 
 #+begin_src emacs-lisp
-(dolist (pair '((org-level-1 . 1.6)
-                (org-level-2 . 1.4)
-                (org-level-3 . 1.2)
-                (org-level-4 . 1.1)))
+(dolist (pair '((org-level-1 . 1.4)
+                (org-level-2 . 1.2)
+                (org-level-3 . 1.1)
+                (org-level-4 . 1.0)))
   (set-face-attribute (car pair) nil :height (cdr pair)))
 #+end_src
 
@@ -686,6 +845,7 @@ Org 默认所有层级的标题字号一样，只靠颜色和缩进区分。
     ;; 外观
     (org-modern-mode 1)                ; 现代样式（图标、表格线、标签）
     (valign-mode 1)                    ; 像素级表格对齐（CJK 友好）
+    (visual-line-mode 1)               ; 超长行自动折行
     (visual-fill-column-mode 1)        ; 居中 + 折行
     (adaptive-wrap-prefix-mode 1)      ; 折行缩进对齐
     ;; 排版
@@ -724,6 +884,82 @@ Org 默认所有层级的标题字号一样，只靠颜色和缩进区分。
             (lambda () (add-hook 'after-save-hook #'my/org-babel-tangle-config nil t)))
 #+end_src
 
+** org-roam：双向链接笔记
+
+=org-roam= 把你的笔记变成网状结构。每篇笔记是一个 Org 文件，
+笔记之间用 =[[file:xxx.org][title]]= 链接。org-roam 自动追踪
+反向链接——哪篇笔记引用了当前这篇，一目了然。
+
+核心操作：
+
+| 快捷键 | 命令 | 做什么 |
+|--------|------|--------|
+| =C-c n f= | =org-roam-node-find= | 查找/创建笔记 |
+| =C-c n i= | =org-roam-node-insert= | 在当前位置插入到另一篇的链接 |
+| =C-c n l= | =org-roam-buffer-toggle= | 打开/关闭反向链接侧栏 |
+| =C-c n t=  | =org-roam-tag-add= | 给笔记加 tag |
+| =C-c n a= | =org-roam-alias-add= | 给笔记加别名 |
+
+=~/.emacs.d/org-roam.db= 自动创建——SQLite 数据库记录所有链接关系。
+不需要手动维护。
+
+#+begin_src emacs-lisp
+(use-package org-roam
+  :ensure t
+  :custom
+  (org-roam-directory (file-truename "~/org"))    ; 笔记根目录
+  (org-roam-db-location "~/.emacs.d/org-roam.db") ; SQLite 数据库位置
+  (org-roam-capture-templates
+   '(("d" "default" plain "%?"
+      :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
+                 "#+title: ${title}\n#+author: singdile\n#+date: %<%Y-%m-%d>\n\n")
+      :unnarrowed t)))
+  :config
+  (org-roam-db-autosync-mode 1)                   ; 自动同步链接
+  :bind (("C-c n f" . org-roam-node-find)
+         ("C-c n i" . org-roam-node-insert)
+         ("C-c n l" . org-roam-buffer-toggle)))
+#+end_src
+
+** org-format-inline-code：修复 =code= 前后空格
+
+从外部复制文本到 Org 文件时，=code= 格式前后可能缺少空格，
+导致 Org 无法正确识别为行内代码。
+
+| 问题 | 修复后 |
+|------|--------|
+| 文字=code=文字 | 文字 =code= 文字 |
+| 文字=code= 文字 | 文字 =code= 文字 |
+| 文字 =code=文字 | 文字 =code= 文字 |
+
+#+begin_src emacs-lisp
+(defun my/org-fix-inline-code-spaces ()
+  "为当前段落或选区的 =code= 前后添加缺失的空格。"
+  (interactive)
+  (let ((start (if (use-region-p) (region-beginning) (save-excursion (backward-paragraph) (point))))
+        (end (if (use-region-p) (region-end) (save-excursion (forward-paragraph) (point)))))
+    (save-excursion
+      (goto-char start)
+      ;; 匹配 =xxx= 格式，但不处理已有空格或处于行首/行尾的情况
+      ;; 模式：非空白/行首 + = + 非空白内容 + = + 非空白/行尾
+      (while (re-search-forward "=\\([^= \n\t]+\\)=" end t)
+        (let ((match-start (match-beginning 0))
+              (match-end (match-end 0))
+              (code-content (match-string 1)))
+          ;; 检查前面是否有空格或行首
+          (unless (or (= match-start (point-min))
+                      (memq (char-before match-start) '(?  ?\t ?\n)))
+            (goto-char match-start)
+            (insert " ")
+            (setq match-end (1+ match-end)))
+          ;; 检查后面是否有空格或行尾
+          (unless (or (= match-end (point-max))
+                      (memq (char-after match-end) '(?  ?\t ?\n)))
+            (goto-char match-end)
+            (insert " "))))))
+  (message "已修复 =code= 前后空格"))
+#+end_src
+
 * 编程语言
 :PROPERTIES:
 :CUSTOM_ID: languages
@@ -731,37 +967,362 @@ Org 默认所有层级的标题字号一样，只靠颜色和缩进区分。
 
 语言专用配置：LSP、格式化、tree-sitter 语法高亮。
 
+** Go
+
+Go 的开发栈：go-ts-mode（语法高亮）+ eglot + gopls（LSP）+ goimports（保存时格式化）。
+
+=gopls= 通过 eglot 提供：补全（corfu 展示）、跳转定义（ =M-.= ）、
+查找引用（ =M-?= ）、重命名（ =M-x eglot-rename= ）、
+错误诊断（flymake 红线）、代码操作（=M-x eglot-code-actions=）。
+
+保存时的格式化和 import 整理由 goimports 提供，避免每次保存走两次同步 LSP 请求。
+
+*** project 识别 Go modules
+
+官方文档指出：Eglot 使用内置 =project= 包识别项目根目录，
+但 =project= 默认不认识 Go modules。需要添加自定义 hook，
+让 =project= 找到最近的 =go.mod= 作为项目根。
+
+| 函数 | 作用 |
+|------|------|
+| =project-find-go-module= | 查找包含 go.mod 的目录 |
+| =project-root= 方法 | 返回 Go module 的根目录 |
+
+#+begin_src emacs-lisp
+;; 让 project.el 识别 Go modules（官方推荐）
+;; https://go.dev/gopls/editor/emacs
+(require 'project)
+
+(defun project-find-go-module (dir)
+  "查找 Go module 根目录，排除 GOMODCACHE。
+  
+问题：如果打开 GOMODCACHE 中的依赖库，project.el 会把它识别为独立项目，
+导致 eglot 启动新的 gopls 实例，而不是复用主项目的服务器。
+
+解决：检测到 go.mod 在 GOMODCACHE 中时，返回 nil，不作为项目识别。
+这样 eglot-extend-to-xref 就能让依赖库文件复用主项目的 gopls。"
+  (when-let* ((root (locate-dominating-file dir "go.mod"))
+              (truename (file-truename root)))
+    (let ((gomodcache (or (getenv "GOMODCACHE")
+                          (expand-file-name "pkg/mod"
+                                            (or (getenv "GOPATH")
+                                                (expand-file-name "~/go"))))))
+      ;; 如果在 GOMODCACHE 中，不属于用户项目
+      (unless (and gomodcache
+                   (file-directory-p gomodcache)
+                   (file-in-directory-p truename (file-truename gomodcache)))
+        (cons 'go-module truename)))))
+
+(cl-defmethod project-root ((project (head go-module)))
+  "返回 Go module 项目的根目录。"
+  (cdr project))
+
+(add-hook 'project-find-functions #'project-find-go-module)
+#+end_src
+
+*** go-ts-mode + eglot
+
+**核心原理：eglot-extend-to-xref 的工作机制**
+
+当 =eglot-extend-to-xref = t= 时：
+
+1. 用户在项目代码中执行 =M-.= (xref-find-definitions)
+2. gopls 返回目标文件的 URI（可能是 =$GOMODCACHE= 或 =GOROOT=）
+3. eglot 将该文件路径和**当前 gopls 服务器**存入 =eglot--servers-by-xrefed-file= 哈希表
+4. 打开跳转后的文件时，eglot 检查该哈希表，自动复用原有的 gopls
+5. 结果：在依赖库/标准库中获得完整的 LSP 功能
+
+**为什么不能用自定义阻止逻辑？**
+
+之前的 =my/go-eglot-ensure= 会主动阻止依赖库启动 eglot，
+这破坏了 =eglot-extend-to-xref= 的机制，
+导致跳转到依赖库后无法继续跳转。
+
+**正确做法：直接使用 =eglot-ensure=**
+
+让 eglot 的内置机制自动处理跨项目跳转，
+配合 =project-find-go-module= 排除 GOMODCACHE，
+确保依赖库不会启动新的 gopls 实例。
+
+#+begin_src emacs-lisp
+(use-package go-ts-mode
+  :ensure nil
+  :mode ("\\.go\\'" . go-ts-mode)     ; .go 文件自动用 go-ts-mode
+  :hook (go-ts-mode . eglot-ensure)   ; 官方推荐，让 eglot-extend-to-xref 自动处理
+  :custom
+  (go-ts-mode-indent-offset 4))
+#+end_src
+*** 保存时格式化和整理 import
+#+begin_src emacs-lisp
+;; goimports：保存时格式化 + import 整理
+(use-package reformatter
+  :after go-ts-mode
+  :config
+  (reformatter-define go-format
+    :program "goimports")
+  (add-hook 'go-ts-mode-hook #'go-format-on-save-mode))
+#+end_src
+
+*** 测试支持（gotest）
+
+=gotest= 提供在 Emacs 中运行 Go 测试的能力：
+- 单个测试函数
+- 当前文件的所有测试
+- 当前包的测试
+- 整个项目的测试
+
+| 快捷键 | 命令 | 说明 |
+|--------|------|------|
+| =C-c t t= | go-test-current-test | 运行当前测试函数 |
+| =C-c t f= | go-test-current-file | 运行当前文件测试 |
+| =C-c t p= | go-test-current-project | 运行当前包测试 |
+| =C-c t P= | go-test-current-project-coverage | 运行测试并显示覆盖率 |
+| =C-c t r= | go-run | 运行 main 包 |
+
+#+begin_src emacs-lisp
+(use-package gotest
+  :ensure t
+  :after go-ts-mode
+  :bind (:map go-ts-mode-map
+              ("C-c t t" . go-test-current-test)
+              ("C-c t f" . go-test-current-file)
+              ("C-c t p" . go-test-current-project)
+              ("C-c t P" . go-test-current-project-coverage)
+              ("C-c t r" . go-run))
+  :custom
+  (go-test-verbose t))  ; 显示详细输出
+#+end_src
+
+*** Go Playground
+
+=go-playground= 允许直接在 Emacs 中分享代码到 go-play.org，
+或下载他人分享的代码片段。
+
+| 快捷键 | 命令 | 说明 |
+|--------|------|------|
+| =C-c e b= | go-play-buffer | 分享当前 buffer |
+| =C-c e r= | go-play-region | 分享选中区域 |
+| =C-c e d= | go-download-play | 下载 playground 代码 |
+
+#+begin_src emacs-lisp
+(use-package go-playground
+  :ensure t
+  :after go-ts-mode
+  :bind (:map go-ts-mode-map
+              ("C-c e b" . go-play-buffer)
+              ("C-c e r" . go-play-region)
+              ("C-c e d" . go-download-play)))
+#+end_src
+
+*** godoc 文档查看
+
+=godoc= 提供离线文档查看，=godoc-at-point= 查看光标处的符号文档。
+比 gopls hover 更适合阅读完整文档。
+
+| 快捷键 | 命令 | 说明 |
+|--------|------|------|
+| =C-h G= | godoc | 查询包文档 |
+| =C-c h= | godoc-at-point | 光标处符号文档 |
+
+#+begin_src emacs-lisp
+(use-package go-mode
+  :ensure t
+  :after go-ts-mode
+  :bind (:map go-ts-mode-map
+              ("C-c h" . godoc-at-point)
+         :map help-map
+              ("G" . godoc)))
+#+end_src
+
+*** go.mod 文件支持
+
+Emacs 30 内置 =go-mod-ts-mode=，为 go.mod 文件提供语法高亮。
+
+#+begin_src emacs-lisp
+(use-package go-mod-ts-mode
+  :ensure nil
+  :mode ("/go\\.mod\\'" . go-mod-ts-mode))
+#+end_src
+
+*** CamelCase 编辑支持
+
+Go 使用驼峰命名，=subword-mode= 让 =M-f= / =M-b= 按驼峰分词移动，
+而不是整个标识符。
+
+#+begin_src emacs-lisp
+(add-hook 'go-ts-mode-hook #'subword-mode)
+#+end_src
+
 ** eglot：LSP 客户端（基础配置）
 
 =eglot= 是 Emacs 29+ 内置的 LSP 客户端。以下配置适用于所有语言——
 只设全局参数，不绑定到具体语言。
 
-| 设置                       | 作用                              |
-|----------------------------+-----------------------------------|
-| =eglot-request-timeout 120=  | 大项目首次索引时避免 Timeout         |
-| =eglot-events-buffer-size 0= | 不记录事件日志，节省内存              |
-| =eglot-autoshutdown t=       | 关闭最后一个 buffer 时自动关语言服务器 |
+**核心设置说明：**
 
-=add-to-list 'eglot-server-programs= 在这里只用来注册 =gopls= 为 Go 服务器。
-将来加了 Python、Rust 等语言，其他 LSP 服务器也注册在这。
+| 设置                       | 值       | 作用                              |
+|----------------------------+----------+-----------------------------------|
+| =eglot-request-timeout=    | 120      | 大项目首次索引时避免 Timeout              |
+| =eglot-events-buffer-size= | 2000000  | 事件日志 2MB，出问题时能排查              |
+| =eglot-autoshutdown=       | nil      | 不自动关闭（用自定义函数管理资源）     |
+| =eglot-send-changes-idle-time= | 0.2  | 同步代码延迟，快速送达 LSP（默认 0.5s）    |
+| =eglot-extend-to-xref=     | t        | **关键**：让跳转到依赖/标准库时复用当前 gopls |
+
+**为什么 =eglot-autoshutdown = nil=？**
+
+默认的 =autoshutdown= 会在关闭最后一个项目 buffer 时关闭 gopls，
+但这会导致：
+- 如果通过 xref 跳转到依赖库，关闭主项目 buffer 后 gopls 会被关闭
+- 依赖库的 buffer 失去 LSP 支持
+
+解决方案：
+- 关闭自动关闭，用自定义函数 =my/eglot-cleanup-xref-servers= 管理资源
+- 在关闭 buffer 时检查是否还有其他 buffer 在使用同一个 gopls
+- 如果没有，才释放资源
+
+**gopls workspace 配置关键参数：**
+
+| 参数                   | 推荐值         | 说明                              |
+|------------------------+----------------+-----------------------------------|
+| =directoryFilters=     | 排除无关目录    | 减少索引负担，加速启动              |
+| =diagnosticsDelay=     | "500ms"        | 诊断延迟，平衡响应和性能            |
+| =completeUnimported=   | t              | 补全未导入的包                    |
+| =deepCompletion=       | t              | 深度补全（可选，可能影响性能）        |
+| =usePlaceholders=      | t              | 补全时显示 ${1:placeholder}       |
+| =staticcheck=          | t              | 启用 staticcheck 静态分析          |
+| =matcher=              | "Fuzzy"        | Fuzzy 匹配（比 CaseSensitive 更灵活）|
+| =symbolScope=          | "all"          | workspace/symbol 搜索所有加载的包   |
+| =importShortcut=       | "Both"         | import 语句支持跳转定义和文档        |
 
 #+begin_src emacs-lisp
 (use-package eglot
   :ensure nil                         ; 内置包，不需要安装
   :custom
   (eglot-request-timeout 120)        ; 大项目索引超时 30s → 120s
-  (eglot-events-buffer-size 0)       ; 不记录事件日志
-  (eglot-autoshutdown t)             ; 自动关语言服务器
+  (eglot-events-buffer-size 2000000)  ; 事件日志 2MB，出问题时用 M-x eglot-events-buffer 排查
+  (eglot-autoshutdown nil)           ; 不自动关闭，用自定义函数管理资源
+  (eglot-send-changes-idle-time 0.2) ; 同步代码延迟：默认 0.5s → 0.2s，快速送达 LSP
+  (eglot-extend-to-xref t)           ; 关键：M-. 跳到依赖/标准库源码时复用当前 gopls
   :config
-  ;; 注册语言服务器。这里只列 Go，将来加语言在这里追加
+  ;; 注册 Go 语言服务器（支持多种模式）
+  ;; 注意：这里使用列表形式，支持 go-ts-mode 和 go-mod-ts-mode
   (add-to-list 'eglot-server-programs
-               '(go-ts-mode . ("gopls")))
+               '((go-ts-mode go-mod-ts-mode) . ("gopls")))
+  
+  ;; gopls workspace 配置
+  ;; 文档：https://github.com/golang/tools/blob/master/gopls/doc/settings.md
+  (setq-default eglot-workspace-configuration
+                '(:gopls
+                  ;; 排除无关目录（减少索引负担）
+                  (:directoryFilters ["-**/node_modules" "-vendor" "-third_party" "-.git" "-grpc-go-examples"]
+                   ;; 诊断延迟（平衡响应速度和性能）
+                   :diagnosticsDelay "500ms"
+                   ;; 补全设置
+                   :completeUnimported t        ; 补全未导入的包
+                   :deepCompletion t            ; 深度补全（可选）
+                   :usePlaceholders t           ; 显示 ${1:arg}
+                   :matcher "Fuzzy"             ; Fuzzy 匹配（推荐）
+                   ;; 符号搜索范围
+                   :symbolScope "all"           ; 搜索所有加载的包
+                   ;; import 语句行为
+                   :importShortcut "Both"       ; 支持跳转定义和文档
+                   ;; 静态分析
+                   :staticcheck t               ; 启用 staticcheck（可选）
+                   :vulncheck "Off"             ; 漏洞检查（按需开启）
+                   ;; 分析器
+                   :analyses (:unusedparams t
+                              :unusedwrite t
+                              :shadow t))))
+  
+  ;; 注册其他语言服务器
   (add-to-list 'eglot-server-programs
                '(json-ts-mode . ("vscode-json-languageserver" "--stdio")))
   (add-to-list 'eglot-server-programs
                '(yaml-ts-mode . ("yaml-language-server" "--stdio")))
   (add-to-list 'eglot-server-programs
-               '(lua-ts-mode . ("lua-language-server"))))
+               '(lua-ts-mode . ("lua-language-server")))
+  
+  ;; ========== 资源管理：自动清理不再需要的 gopls 实例 ==========
+  ;;
+  ;; 问题：eglot-extend-to-xref 会让依赖库文件复用主项目的 gopls，
+  ;; 但当关闭主项目 buffer 后，gopls 仍在运行，占用资源。
+  ;;
+  ;; 解决：在关闭 buffer 时检查：
+  ;; 1. 当前 buffer 是否是通过 xref 打开的非项目文件
+  ;; 2. 是否还有其他 buffer 在使用同一个 gopls 服务器
+  ;; 3. 如果没有，则关闭该服务器，释放资源
+  ;;
+  (defun my/eglot-cleanup-xref-servers ()
+    "清理不再需要的 xref 关联的服务器。
+    
+当关闭通过 xref 跳转打开的依赖库/标准库 buffer 时，
+检查是否还有其他 buffer 在使用同一个 gopls 服务器。
+如果没有，则关闭服务器，释放资源。"
+    (when-let ((server (eglot-current-server)))
+      ;; 检查当前 buffer 是否属于某个项目
+      (let ((project (eglot--current-project)))
+        ;; 如果当前 buffer 不属于任何项目（依赖库/标准库）
+        ;; 且是通过 xref 打开的
+        (unless (and project (project-root project))
+          ;; 查找所有使用这个服务器的 buffer
+          (let ((buffers-using-server
+                 (cl-remove-if-not
+                  (lambda (buf)
+                    (with-current-buffer buf
+                      (and (eglot-current-server)
+                           (eq (eglot-current-server) server))))
+                  (buffer-list))))
+            ;; 如果只有当前 buffer 在使用，关闭服务器
+            (when (= (length buffers-using-server) 1)
+              (message "关闭不再使用的 gopls 服务器 (PID: %s)"
+                       (process-id (jsonrpc--process server)))
+              (eglot-shutdown server)))))))
+  
+  (add-hook 'kill-buffer-hook #'my/eglot-cleanup-xref-servers)
+  
+  ;; ========== 调试工具 ==========
+  ;;
+  ;; 检查 eglot-extend-to-xref 是否正常工作
+  ;; 用法：M-x my/eglot-show-xref-servers
+  ;;
+  (defun my/eglot-show-xref-servers ()
+    "显示当前所有 xref 关联的服务器。
+    
+用于调试 eglot-extend-to-xref 是否正常工作。
+如果跳转到依赖库后此列表为空，说明 xref 机制未生效。"
+    (interactive)
+    (if (boundp 'eglot--servers-by-xrefed-file)
+        (let ((count (hash-table-count eglot--servers-by-xrefed-file)))
+          (message "Xref 关联的服务器数量: %d" count)
+          (when (> count 0)
+            (maphash
+             (lambda (file server)
+               (message "  %s -> PID:%s"
+                        (file-name-nondirectory file)
+                        (process-id (jsonrpc--process server))))
+             eglot--servers-by-xrefed-file)))
+      (message "eglot--servers-by-xrefed-file 未定义（eglot 可能未加载）"))))
+
+;; ========== Flymake 诊断优化 ==========
+;;
+;; 问题：编辑时旧的诊断 overlay 会留在原地，对应不上新代码
+;; 原因：(1) Flymake 触发太急，停顿就报错 (2) LSP 防抖延迟 (3) GC 卡顿
+;; 解决：三管齐下——延迟触发、快速同步、智能清理
+;;
+(use-package flymake
+  :custom
+  ;; 1. 延长空闲等待时间（单位：秒）。
+  ;; 默认往往是 0.5 秒甚至更低，改成 1.5 秒。等你真正停下来思考时再检测。
+  (flymake-no-changes-timeout 1.5)
+  
+  ;; 2. 关键设置：换行时强制启动检测。
+  ;; 写完一行 var bbb = 3 顺手敲回车换行时，立马刷新检测，不等超时。
+  (flymake-start-on-flymake-mode t)
+  
+  :config
+  ;; 3. 彻底解决旧报错不消失的顽疾：
+  ;; 每次检测前，强制清空上一次在该缓冲区留下的所有陈旧的 Overlay 视觉提示。
+  (add-hook 'flymake-backend-changed-functions #'flymake-start))
 #+end_src
 
 ** JSON
@@ -777,40 +1338,6 @@ Emacs 30 内置 =json-ts-mode=。tree-sitter 语法库已由系统安装（=tree
   :mode ("\\.json\\'" . json-ts-mode)
   :custom
   (json-ts-mode-indent-offset 2))
-#+end_src
-
-** Go
-
-Go 的开发栈：go-ts-mode（语法高亮）+ eglot + gopls（LSP）
-+ goimports（格式化 + import 管理）。
-
-=gopls= 通过 eglot 提供：补全（corfu 展示）、跳转定义（ =M-.= ）、
-查找引用（ =M-?= ）、重命名（ =M-x eglot-rename= ）、
-错误诊断（flymake 红线）、代码操作（=M-x eglot-code-actions=）。
-
-=goimports= 保存时自动格式化 + 添加缺失的 import + 删除未使用的 import。
-注意确保 =go install golang.org/x/tools/cmd/goimports@latest= 且 =~/go/bin= 在 =$PATH= 中。
-
-#+begin_src emacs-lisp
-;; go-ts-mode + auto-eglot
-(use-package go-ts-mode
-  :ensure nil
-  :mode ("\\.go\\'" . go-ts-mode)     ; .go 文件自动用 go-ts-mode
-  :hook (go-ts-mode . eglot-ensure)
-  :custom
-  (go-ts-mode-indent-offset 4))
-;; go-mod-ts-mode：go.mod 语法高亮
-(use-package go-mod-ts-mode
-  :ensure nil
-  :mode ("/go\\.mod\\'" . go-mod-ts-mode))
-
-;; reformatter + goimports（保存时格式化 + import）
-(use-package reformatter
-  :ensure t
-  :config
-  (reformatter-define go-format
-    :program "goimports")
-  (add-hook 'go-ts-mode-hook 'go-format-on-save-mode))
 #+end_src
 
 ** YAML
@@ -865,6 +1392,19 @@ LSP 服务器推荐： =sudo pacman -S lua-language-server=
   (lua-ts-mode-indent-offset 2))
 #+end_src
 
+** Markdown
+
+=markdown-mode= 是 Markdown 编辑的标准包，提供语法高亮、
+折叠、预览和导出。关联 =.md= / =.markdown= 文件。
+
+#+begin_src emacs-lisp
+(use-package markdown-mode
+  :ensure t
+  :mode ("\\.md\\'" . markdown-mode)
+  :custom
+  (markdown-command "pandoc"))  ; 用 pandoc 渲染预览
+#+end_src
+
 * 终端（Eat）
 :PROPERTIES:
 :CUSTOM_ID: terminal
@@ -883,8 +1423,64 @@ Eat 有两种模式：
 - =C-c t t= 在其他窗口打开 Eat
 - 重复执行创建多个独立终端（=*eat*=, =*eat*<2>=, ...）
 
+和 Emacs 的其他终端方案对比：
+
+| 终端 | 原理 | 优点 | 缺点 |
+|------+------+------+------|
+| Eat | 纯 Elisp 模拟终端 | 跨平台、零外部依赖、和 Emacs 集成自然 | 极少数边缘情况下不如原生终端 |
+| vterm | Emacs 模块 + libvterm (C) | 速度最快、终端兼容性最好 | 需要编译 C 模块、跨平台问题多 |
+| eshell | Elisp 实现的 shell | 和 Elisp 深度集成、跨平台 | 不是真正的终端，不能跑全屏程序 |
+| shell | comint-mode 包装系统 shell | 简单、内置 | 终端兼容性差（htop/vim 无法使用） |
+
+**Eat 的使用场景：**
+- 日常 =git=、=make=、=go build= 等命令行操作
+- 用 Emacs 快捷键在终端里复制粘贴（=C-y= 直接粘贴）
+- 终端输出可编辑（Line 模式下像普通 buffer 一样移动光标、选中文本）
+
+**两种模式：**
+
+| 模式 | 快捷键切换 | 行为 |
+|------+-----------+------|
+| Char 模式（默认） | =C-c C-k= → Line 模式 | 键盘输入直接发送给终端，像普通终端一样操作 |
+| Line 模式 | =C-c C-k= → Char 模式 | 可以像编辑普通 buffer 一样在终端输出里移动光标、选中、复制 |
+
+**配置说明：**
+- =eat-shell=：指定终端里跑的 shell，默认不设时 Eat 用 =$SHELL= 环境变量
+- =eat-kill-buffer-on-exit=：=exit= 后自动关闭终端 buffer，省去手动 =C-x k=
+- =eat-cursor-type=：Char 模式下光标样式（=bar= 竖线、=box= 方块、=hollow= 空心）
+
+**全局快捷键：**
+
+| 快捷键 | 命令 | 做什么 |
+|--------+------+--------|
+| =C-c t t= | =eat-other-window= | 在另一个窗口打开 Eat |
+| =C-c t n= | =eat= | 在当前窗口打开新的 Eat buffer |
+| =C-c t p= | =my/eat-project= | 在项目根目录打开 Eat |
+
+如果同一项目多次按 =C-c t t=，Eat 会复用已有的终端 buffer 而不是创建新的。
+用 =C-c t n= 则每次创建一个新的独立终端实例。
+
 #+begin_src emacs-lisp
-;; TODO: Eat 终端配置
+(use-package eat
+  :ensure t
+  :custom
+  (eat-kill-buffer-on-exit t)          ; exit 后自动关闭终端 buffer
+  (eat-cursor-type 'bar)               ; Char 模式用竖线光标（和 Alacritty 习惯一致）
+  :bind (:map eat-mode-map
+         ;; Eat 内置了 C-c C-k 在 char/line 模式间切换，这里不覆盖
+         )
+  :config
+  ;; 全局快捷键
+  (global-set-key (kbd "C-c t t") 'eat-other-window)  ; 在另一个窗口打开终端
+  (global-set-key (kbd "C-c t n") 'eat)               ; 在当前窗口打开终端
+  ;; 在项目根目录打开终端
+  (defun my/eat-project ()
+    "在项目根目录打开 Eat 终端。"
+    (interactive)
+    (let ((default-directory (or (projectile-project-root)
+                                 default-directory)))
+      (eat-other-window)))
+  (global-set-key (kbd "C-c t p") 'my/eat-project))
 #+end_src
 
 * Dired
@@ -941,4 +1537,3 @@ Eat 有两种模式：
   (when (file-exists-p local-file)
     (load local-file)))
 #+end_src
-
