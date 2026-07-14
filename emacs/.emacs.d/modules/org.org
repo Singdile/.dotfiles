@@ -1,0 +1,165 @@
+#+title: org — Org 模式
+#+property: header-args:emacs-lisp  :tangle ../lisp/org.el :results silent
+
+* Org 模式
+
+** 基础设置
+
+#+begin_src emacs-lisp
+(setq org-directory "~/org/")
+(setq org-agenda-files '("~/org/Tasks.org" "~/org/habits.org"))
+(setq org-startup-indented t)
+(setq org-hide-emphasis-markers t)
+(setq org-pretty-entities t)
+(setq org-startup-truncated nil)
+(setq org-ellipsis " ▾")
+(setq org-image-actual-width '(600))
+(setq org-log-done 'time)
+(setq org-log-into-drawer t)
+(setq org-todo-keywords
+      '((sequence "TODO(t)" "NEXT(n)" "|" "DONE(d!)")))
+(setq org-tag-alist
+      '(("go"     . ?g)
+        ("linux"  . ?l)
+        ("emacs"  . ?e)
+        ("note"   . ?n)
+        ("bug"    . ?b)
+        ("feat"   . ?f)
+        ("grpc"   . ?r)
+        ("review" . ?v)))
+(setq org-tags-column 96)
+(setq org-refile-targets
+      '(("~/org/Archive.org" :maxlevel . 1)
+        ("~/org/Tasks.org"   :maxlevel . 1)))
+(advice-add 'org-refile :after 'org-save-all-org-buffers)
+(require 'org-habit)
+(add-to-list 'org-modules 'org-habit)
+(setq org-habit-graph-column 60)
+(require 'org-tempo)
+(dolist (pair '(("go" . "src go")
+                ("el" . "src emacs-lisp")
+                ("sh" . "src sh")
+                ("ya" . "src yaml")))
+  (add-to-list 'org-structure-template-alist pair))
+#+end_src
+
+** 标题美化（org-modern）
+
+#+begin_src emacs-lisp
+(use-package org-modern
+  :ensure t
+  :demand t
+  :hook (org-agenda-finalize . org-modern-agenda)
+  :custom
+  (org-modern-prettify nil)
+  (org-modern-star '("◉" "○" "✸" "✿" "✤" "✜" "◆" "▶"))
+  (org-modern-table-vertical 1)
+  (org-modern-table-horizontal 2)
+  (org-modern-list '((43 . "◦") (45 . "•") (42 . "•")))
+  (org-modern-todo-faces
+   '(("TODO" :inverse-video t :inherit org-todo)
+     ("DONE" :inverse-video t :inherit org-done))))
+#+end_src
+
+** 表格对齐（valign）
+
+#+begin_src emacs-lisp
+(use-package valign
+  :ensure t
+  :hook (org-mode . valign-mode)
+  :custom
+  (valign-fancy-bar t))
+#+end_src
+
+** 标题字号
+
+#+begin_src emacs-lisp
+(dolist (pair '((org-level-1 . 1.4)
+                (org-level-2 . 1.2)
+                (org-level-3 . 1.1)
+                (org-level-4 . 1.0)))
+  (set-face-attribute (car pair) nil :height (cdr pair)))
+#+end_src
+
+** 启动时自动配置
+
+#+begin_src emacs-lisp
+(defun my/org-mode-setup ()
+  (org-modern-mode 1)
+  (valign-mode 1)
+  (visual-line-mode 1)
+  (setq-local line-spacing 0.3))
+
+(add-hook 'org-mode-hook 'my/org-mode-setup)
+#+end_src
+
+** Babel：在 Org 里执行代码
+
+#+begin_src emacs-lisp
+(org-babel-do-load-languages
+ 'org-babel-load-languages
+ '((emacs-lisp . t)
+   (shell . t)
+   (sql . t)
+   (python . t)
+   (dot . t)))
+
+(use-package ob-go
+  :ensure t
+  :after org
+  :config
+  (add-to-list 'org-babel-load-languages '(go . t)))
+
+(defun my/org-babel-tangle-config ()
+  (when (string-equal (expand-file-name "config.org" user-emacs-directory)
+                      (buffer-file-name))
+    (let ((org-confirm-babel-evaluate nil))
+      (org-babel-tangle))))
+(add-hook 'org-mode-hook
+          (lambda () (add-hook 'after-save-hook #'my/org-babel-tangle-config nil t)))
+#+end_src
+
+** org-roam：双向链接笔记
+
+#+begin_src emacs-lisp
+(use-package org-roam
+  :ensure t
+  :custom
+  (org-roam-directory (file-truename "~/org"))
+  (org-roam-db-location "~/.emacs.d/org-roam.db")
+  (org-roam-capture-templates
+   '(("d" "default" plain "%?"
+      :if-new (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
+                 "#+title: ${title}\n#+author: singdile\n#+date: %<%Y-%m-%d>\n\n")
+      :unnarrowed t)))
+  :config
+  (org-roam-db-autosync-mode 1)
+  :bind (("C-c n f" . org-roam-node-find)
+         ("C-c n i" . org-roam-node-insert)
+         ("C-c n l" . org-roam-buffer-toggle)))
+#+end_src
+
+** org-format-inline-code：修复 =code= 前后空格
+
+#+begin_src emacs-lisp
+(defun my/org-fix-inline-code-spaces ()
+  (interactive)
+  (let ((start (if (use-region-p) (region-beginning) (save-excursion (backward-paragraph) (point))))
+        (end (if (use-region-p) (region-end) (save-excursion (forward-paragraph) (point)))))
+    (save-excursion
+      (goto-char start)
+      (while (re-search-forward "=\\([^= \n\t]+\\)=" end t)
+        (let ((match-start (match-beginning 0))
+              (match-end (match-end 0))
+              (code-content (match-string 1)))
+          (unless (or (= match-start (point-min))
+                      (memq (char-before match-start) '(?  ?\t ?\n)))
+            (goto-char match-start)
+            (insert " ")
+            (setq match-end (1+ match-end)))
+          (unless (or (= match-end (point-max))
+                      (memq (char-after match-end) '(?  ?\t ?\n)))
+            (goto-char match-end)
+            (insert " "))))))
+  (message "已修复 =code= 前后空格"))
+#+end_src

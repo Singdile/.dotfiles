@@ -1,0 +1,80 @@
+#+title: terminal
+#+property: header-args:emacs-lisp  :tangle ../lisp/terminal.el :results silent
+
+* 终端（Eat）
+:PROPERTIES:
+:CUSTOM_ID: terminal
+:END:
+
+=Eat= 是一个纯 Elisp 实现的终端模拟器，不需要外部依赖。
+和 =vterm= 相比：稍慢一点，但跨平台好、配置简单、和 Emacs 集成更自然。
+
+Eat 有两种模式：
+- Char 模式（默认）：键盘直接发送到终端，像普通终端
+- Line 模式：可以像编辑普通 buffer 一样在终端输出里移动光标
+
+按 =C-c C-k= 在两种模式间切换。
+
+常用操作：
+- =C-c t t= 在其他窗口打开 Eat
+- 重复执行创建多个独立终端（=*eat*=, =*eat*<2>=, ...）
+
+和 Emacs 的其他终端方案对比：
+
+| 终端 | 原理 | 优点 | 缺点 |
+|------+------+------+------|
+| Eat | 纯 Elisp 模拟终端 | 跨平台、零外部依赖、和 Emacs 集成自然 | 极少数边缘情况下不如原生终端 |
+| vterm | Emacs 模块 + libvterm (C) | 速度最快、终端兼容性最好 | 需要编译 C 模块、跨平台问题多 |
+| eshell | Elisp 实现的 shell | 和 Elisp 深度集成、跨平台 | 不是真正的终端，不能跑全屏程序 |
+| shell | comint-mode 包装系统 shell | 简单、内置 | 终端兼容性差（htop/vim 无法使用） |
+
+**Eat 的使用场景：**
+- 日常 =git=、=make=、=go build= 等命令行操作
+- 用 Emacs 快捷键在终端里复制粘贴（=C-y= 直接粘贴）
+- 终端输出可编辑（Line 模式下像普通 buffer 一样移动光标、选中文本）
+
+**两种模式：**
+
+| 模式 | 快捷键切换 | 行为 |
+|------+-----------+------|
+| Char 模式（默认） | =C-c C-k= → Line 模式 | 键盘输入直接发送给终端，像普通终端一样操作 |
+| Line 模式 | =C-c C-k= → Char 模式 | 可以像编辑普通 buffer 一样在终端输出里移动光标、选中、复制 |
+
+**配置说明：**
+- =eat-shell=：指定终端里跑的 shell，默认不设时 Eat 用 =$SHELL= 环境变量
+- =eat-kill-buffer-on-exit=：=exit= 后自动关闭终端 buffer，省去手动 =C-x k=
+- =eat-cursor-type=：Char 模式下光标样式（=bar= 竖线、=box= 方块、=hollow= 空心）
+
+**全局快捷键：**
+
+| 快捷键 | 命令 | 做什么 |
+|--------+------+--------|
+| =C-c t t= | =eat-other-window= | 在另一个窗口打开 Eat |
+| =C-c t n= | =eat= | 在当前窗口打开新的 Eat buffer |
+| =C-c t p= | =my/eat-project= | 在项目根目录打开 Eat |
+
+如果同一项目多次按 =C-c t t=，Eat 会复用已有的终端 buffer 而不是创建新的。
+用 =C-c t n= 则每次创建一个新的独立终端实例。
+
+#+begin_src emacs-lisp
+(use-package eat
+  :ensure t
+  :custom
+  (eat-kill-buffer-on-exit t)          ; exit 后自动关闭终端 buffer
+  (eat-cursor-type 'bar)               ; Char 模式用竖线光标（和 Alacritty 习惯一致）
+  :bind (:map eat-mode-map
+         ;; Eat 内置了 C-c C-k 在 char/line 模式间切换，这里不覆盖
+         )
+  :config
+  ;; 全局快捷键
+  (global-set-key (kbd "C-c t t") 'eat-other-window)  ; 在另一个窗口打开终端
+  (global-set-key (kbd "C-c t n") 'eat)               ; 在当前窗口打开终端
+  ;; 在项目根目录打开终端
+  (defun my/eat-project ()
+    "在项目根目录打开 Eat 终端。"
+    (interactive)
+    (let ((default-directory (or (projectile-project-root)
+                                 default-directory)))
+      (eat-other-window)))
+  (global-set-key (kbd "C-c t p") 'my/eat-project))
+#+end_src

@@ -1,0 +1,266 @@
+#+title: editing
+#+property: header-args:emacs-lisp  :tangle ../lisp/editing.el :results silent
+
+* 编辑增强
+:PROPERTIES:
+:CUSTOM_ID: editing
+:END:
+
+让打字和编辑更顺畅的配置：补全、括号配对、搜索等。
+
+** 补全框架
+
+选择 Vertico + Corfu + Orderless 路线，各司其职：
+
+| 包             | 职责                         | 工作位置                      |
+|----------------+------------------------------+------------------------------|
+| vertico        | 竖直展示补全候选               | minibuffer (M-x、C-x C-f 等) |
+| marginalia     | 给候选加注释(文件大小,函数签名等) | minibuffer(vertico 的好搭档)  |
+| orderless      | 灵活的匹配规则(支持空格分词,正则) | 全局生效                      |
+| corfu          | 代码编辑器内的弹出补全框         | buffer 内(光标处)             |
+| corfu-terminal | 终端 Emacs 下的 corfu 适配     | buffer 内(终端专用)           |
+
+*** Vertico：竖直 minibuffer 补全
+
+Emacs 默认的 =M-x= 只有一行，候选水平滚动。
+=vertico= 把候选展开成竖直列表，一目了然。
+
+两个自定义参数：
+
+=vertico-cycle=：设为 =t= 后，候选列表首尾相连可以循环。
+更重要的是：当零候选（比如打了一个不存在的文件名），
+vertico 不会报错而是灰显输入，让你直接回车创建新文件。
+
+#+begin_src emacs-lisp
+(use-package vertico
+  :ensure t
+  :custom
+  (vertico-cycle t)             ; 循环候选 + 零候选不报错
+  :init
+  (vertico-mode 1))
+#+end_src
+
+*** Orderless：智能模糊匹配
+
+这是 Daniel Mendler（vertico/corfu/marginalia 的作者）推荐的
+标准配置。核心策略：
+
+- 对于 =M-x =、buffer 切换、变量补全：用 =orderless= 做子串匹配
+- 对于 =C-x C-f= 文件补全：用 =partial-completion= 处理路径分隔符语义
+
+=partial-completion= 的路径匹配规则：
+把输入按 =/=、=.= 等分隔符拆成路径段，每段做前缀匹配。
+- =~/.e → .emacs.d/ （=~= 展开后，=.e= 前缀匹配 =.emacs.d=）
+- =e a = 空格分隔 → =e= 和 =a= 分别匹配不同路径段
+
+对 =M-x= 等命令补全， =orderless= 继续生效：
+- =inst pack= →  =package-install= （两词都找到）
+- =!backup= → 排除含 backup 的候选
+
+#+begin_src emacs-lisp
+  (use-package orderless
+    :ensure t
+    :demand t
+    :config
+    ;; 补全样式：orderless 优先，basic 兜底
+    (setq completion-styles '(orderless basic)
+          completion-category-defaults nil
+          completion-category-overrides
+          '((file (styles partial-completion))))  ; 文件路径用 partial-completion
+    ;; 按空格分词，# 转义
+    (setq orderless-component-separator #'orderless-escapable-split-on-space))
+#+end_src
+
+*** Marginalia：给候选加注释
+
+默认的 minibuffer 补全只有函数名，看不出它是做什么的。
+=marginalia= 在右侧追加一行灰色小字：文件显示路径、函数显示签名、
+变量显示当前值。
+
+=marginalia-mode= 全局开启即可。
+
+#+begin_src emacs-lisp
+(use-package marginalia
+  :ensure t
+  :config
+  (marginalia-mode 1))
+#+end_src
+
+*** Consult：增强版命令 + 实时预览
+
+=consult= 是 Daniel Mendler 做的另一款工具，用新命令替换 Emacs
+默认的几个搜索/跳转命令，全部集成 vertico，支持实时预览。
+
+**代替原生命令的新快捷键：**
+
+| 命令 | 快捷键 | 替代的原生命令 | 增强了什么 |
+|--------|--------|---------------|------------|
+| =consult-buffer= | =C-x b= | =switch-to-buffer= | 右边实时预览 buffer 内容 |
+| =consult-line= | =M-s l= | =isearch= 的补充 | 用 vertico 竖直列表搜索当前文件 |
+| =consult-ripgrep= | =M-s r= | =rgrep= | 异步搜索，结果带预览 |
+| =consult-imenu= | 无（=M-x= 调用）| =imenu= | 文件大纲跳转，预览函数体 |
+| =consult-goto-line= | =M-g g= | =goto-line= | 输行号时实时看到那一行 |
+| =consult-find= | =M-s f= | =find-name-dired= | 按文件名搜索 |
+| =consult-recent-file= | 无 | =recentf= | 最近文件，预览内容 |
+| =consult-bookmark= | 无 | =bookmark-jump= | 跳转书签，预览 |
+
+**工作原理：** consult 的所有命令都是对 =completing-read= 的包装。
+候选列表由 vertico 展示，注释由 marginalia 追加。
+三件工具无缝协作。
+
+**=consult-customize=** 让某些命令预置参数。
+这里让 =consult-buffer= / =consult-buffer-other-window=
+在预览时忽略纯概念 buffer（=*= 开头的，如 =*Messages*=）。
+
+#+begin_src emacs-lisp
+(use-package consult
+  :ensure t
+  ;; 用 consult 命令替换原生命令的快捷键
+  :bind (("C-x b" . consult-buffer)        ; 切换 buffer，带预览
+         ("M-g g" . consult-goto-line)     ; 跳转到行，带预览
+         ("M-g M-g" . consult-goto-line)   ; 同上（备用）
+         ;; 在 search-map 下追加（M-s 前缀）
+         :map search-map
+         (("l" . consult-line)             ; M-s l：竖直列表搜索当前文件
+          ("r" . consult-ripgrep)          ; M-s r：项目内递归搜索
+          ("f" . consult-find))             ; M-s f：按文件名搜索
+         ;; minibuffer 内：C-r 搜索历史（和 shell 习惯一致）
+         :map minibuffer-local-map
+         (("C-r" . consult-history)))       ; 从历史中搜索
+  :custom
+  ;; 预览相关
+  (consult-preview-key 'any)               ; 任何键都触发预览（默认只部分键）
+  ;; buffer 预览时忽略 * 开头的特殊 buffer
+  (consult-buffer-filter
+   '("\\` " "\\`\\*Customize" "\\`\\*Messages" "\\`\\*scratch"))
+  :config
+  ;; 预览时的样式
+  (setq consult-preview-allowed-hooks '(global-font-lock-mode-hook
+                                        rainbow-delimiters-mode-hook)))
+#+end_src
+
+*** Corfu：行内弹出补全
+
+编写代码时，输入几个字符后自动弹出一个候选菜单，用 =M-n= /=M-p=
+上下选择，=TAB= 或 =RET= 确认。
+
+=corfu-auto=：开启自动弹出。输入一定字符数后自动弹出候选。
+=corfu-auto-prefix=：输入多少字符后自动弹出（默认 3）。
+=corfu-auto-delay=：暂停输入多少秒后弹出（默认 0，即立刻）。
+
+=corfu-popupinfo-mode=：弹出的候选旁边再弹出一个详情窗口，
+显示文档字符串/函数签名。类似 IDE 的悬浮文档。
+
+#+begin_src emacs-lisp
+(use-package corfu
+  :ensure t
+  :custom
+  (corfu-auto t)                  ; 自动弹出补全
+  (corfu-auto-prefix 2)           ; 输入 2 个字符后就弹出
+  (corfu-auto-delay 0.05)         ; 停止输入 0.05 秒后弹出
+  :config
+  (global-corfu-mode 1)           ; 全局启用 corfu
+  (corfu-popupinfo-mode 1))       ; 弹出详情
+#+end_src
+
+*** corfu-terminal：终端适配
+
+Emacs 在终端下（=emacs -nw=）不支持 child frame，
+corfu 的弹出框需要改用 overlay 方式渲染。
+=corfu-terminal= 自动检测并适配。
+
+#+begin_src emacs-lisp
+(unless (display-graphic-p)
+  (use-package corfu-terminal
+    :ensure t
+    :config
+    (corfu-terminal-mode 1)))
+#+end_src
+
+** 括号补全
+
+Emacs 内置了 =electric-pair-mode= ，输入左括号自动补右括号。
+比 =smartparens= 更轻量，覆盖 90% 的场景。
+
+如果需要对 HTML/LaTeX 等标记语言的结构化编辑，再用 =smartparens=。
+
+#+begin_src emacs-lisp
+;; TODO: electric-pair-mode 或 smartparens
+#+end_src
+
+** which-key：快捷键提示
+
+按前缀键（如 =C-x=、=C-c=）后停顿半秒，自动弹出一个窗口
+列出该前缀下所有可用的后续按键。
+
+不需要背快捷键——看一眼菜单就知道下一步可以按什么。
+每个你后来安装的包（Go、Eat、Dired 等）加的快捷键也会自动出现。
+
+#+begin_src emacs-lisp
+  (use-package which-key
+    :ensure t
+    :diminish which-key-mode
+    :config
+    (which-key-mode))
+#+end_src
+
+** helpful：增强帮助面板
+
+原生 =C-h f= 查看函数时只显示一句话文档和源码链接。
+=helpful= 接管这些命令，直接内联显示完整 Elisp 源码、
+快捷键绑定列表、引用关系等。
+
+尤其你还在搭建自己的配置——每写一个 =use-package= 块，
+光标放在函数名上按 =C-h f= 立刻看到源码实现、所有绑定键。
+
+**接管的关系：**
+
+| 新快捷键 | 命令 | 替代的原生命令 | 增强了什么 |
+|----------|------|---------------|------------|
+| =C-h f= | =helpful-callable= | =describe-function= | 内联源码、快捷键、引用 |
+| =C-h v= | =helpful-variable= | =describe-variable= | 语法高亮的值显示 |
+| =C-h k= | =helpful-key= | =describe-key= | 显示该键对应的命令详情 |
+| =C-h x= | =helpful-command= | — | 专看可交互命令（=M-x= 里的），含 keymap 信息 |
+
+用 =C-h f= 查看 =consult-buffer= → helpful 直接展开 consult.el
+的 Elisp 源码，不跳转、不翻页。
+
+#+begin_src emacs-lisp
+(use-package helpful
+  :ensure t
+  :bind (("C-h f" . helpful-callable)   ; 函数/宏
+         ("C-h v" . helpful-variable)   ; 变量
+         ("C-h k" . helpful-key)        ; 快捷键
+         ("C-h x" . helpful-command)    ; 交互命令
+         ("C-h q" . my/close-help-window)))  ; 关闭帮助窗口
+
+;; 关闭帮助窗口而不影响其他窗口
+;; 问题：C-x 1 会关闭所有其他窗口，C-x 0 需要移动光标
+;; 解决：一键关闭帮助窗口，光标保持在原位置
+(defun my/close-help-window ()
+  "关闭帮助窗口，不影响其他窗口布局。"
+  (interactive)
+  (dolist (buf (buffer-list))
+    (when (and (buffer-live-p buf)
+               (with-current-buffer buf
+                 (derived-mode-p 'help-mode 'helpful-mode 'Info-mode)))
+      (when-let ((win (get-buffer-window buf)))
+        (quit-window nil win)))))
+#+end_src
+
+** rainbow-delimiters：括号彩虹色
+
+给不同嵌套深度的括号、方括号、花括号分配不同颜色。
+一眼看出哪个 =)= 和哪个 =)= 配对，哪些括号层次没闭合。
+
+编辑 Elisp（=config.org= 里大量括号）和 Go（=struct{}=、=fn()=）
+时尤其有用。全用 =:custom= 设置，不需要手工调用 mode 函数——
+=rainbow-delimiters-mode= 会在支持的编程模式中自动启用。
+
+#+begin_src emacs-lisp
+(use-package rainbow-delimiters
+  :ensure t
+  :custom
+  (rainbow-delimiters-max-face-count 9)  ; 9 层嵌套各有不同颜色
+  :hook (prog-mode . rainbow-delimiters-mode))
+#+end_src

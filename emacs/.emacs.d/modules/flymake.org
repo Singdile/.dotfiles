@@ -1,0 +1,26 @@
+#+title: flymake
+#+property: header-args:emacs-lisp  :tangle ../lisp/flymake.el :results silent
+
+#+begin_src emacs-lisp
+;; ========== Flymake 诊断优化 ==========
+;;
+;; 问题：编辑时旧的诊断 overlay 会留在原地，对应不上新代码
+;; 原因：(1) Flymake 触发太急，停顿就报错 (2) LSP 防抖延迟 (3) GC 卡顿
+;; 解决：三管齐下——延迟触发、快速同步、智能清理
+;;
+(use-package flymake
+  :custom
+  ;; 1. 延长空闲等待时间（单位：秒）。
+  ;; 默认往往是 0.5 秒甚至更低，改成 1.5 秒。等你真正停下来思考时再检测。
+  (flymake-no-changes-timeout 1.5)
+  
+  ;; 2. 关键设置：换行时强制启动检测。
+  ;; 写完一行 var bbb = 3 顺手敲回车换行时，立马刷新检测，不等超时。
+  (flymake-start-on-flymake-mode t)
+  
+  :config
+  ;; 3. 彻底解决旧报错不消失的顽疾：
+  ;; 每次检测前，强制清空上一次在该缓冲区留下的所有陈旧的 Overlay 视觉提示。
+  (add-hook 'flymake-backend-changed-functions #'flymake-start))
+#+end_src
+#+end_src

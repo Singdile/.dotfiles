@@ -1,0 +1,24 @@
+#+title: dired
+#+property: header-args:emacs-lisp  :tangle ../lisp/dired.el :results silent
+
+* Dired
+:PROPERTIES:
+:CUSTOM_ID: dired
+:END:
+
+=Dired= 是 Emacs 内置的文件管理器。几个关键的增强：
+
+- =dired-dwim-target=：当有多个 Dired 窗口时，=C=（复制）和 =R=（重命名）
+  的默认目标自动设为另一个窗口的目录。这就是"双面板文件管理器"体验。
+
+- =dired-kill-when-opening-new-dired-buffer=： =a= 重新进入目录时复用当前 buffer，
+  而不是开一堆 Dired buffer。
+
+- 按 =C-x C-q= 进入 wdired 模式，可以像编辑文本一样批量改文件名。
+
+- 标记文件后按 =Q= 可以在标记的文件中执行 =query-replace-regexp=，
+  这是跨文件搜索替换最方便的方式。
+
+#+begin_src emacs-lisp
+;; TODO: dired-dwim-target 等增强
+#+end_src

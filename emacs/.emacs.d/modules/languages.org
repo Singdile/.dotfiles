@@ -1,0 +1,427 @@
+#+title: languages — 编程语言
+#+property: header-args:emacs-lisp  :tangle ../lisp/languages.el :results silent
+
+* 编程语言
+:PROPERTIES:
+:CUSTOM_ID: languages
+:END:
+
+语言专用配置：LSP、格式化、tree-sitter 语法高亮。
+
+** Go
+
+Go 的开发栈：go-ts-mode（语法高亮）+ eglot + gopls（LSP）+ goimports（保存时格式化）。
+
+=gopls= 通过 eglot 提供：补全（corfu 展示）、跳转定义（ =M-.= ）、
+查找引用（ =M-?= ）、重命名（ =M-x eglot-rename= ）、
+错误诊断（flymake 红线）、代码操作（=M-x eglot-code-actions=）。
+
+保存时的格式化和 import 整理由 goimports 提供，避免每次保存走两次同步 LSP 请求。
+
+*** project 识别 Go modules
+
+官方文档指出：Eglot 使用内置 =project= 包识别项目根目录，
+但 =project= 默认不认识 Go modules。需要添加自定义 hook，
+让 =project= 找到最近的 =go.mod= 作为项目根。
+
+| 函数 | 作用 |
+|------|------|
+| =project-find-go-module= | 查找包含 go.mod 的目录 |
+| =project-root= 方法 | 返回 Go module 的根目录 |
+
+#+begin_src emacs-lisp
+;; 让 project.el 识别 Go modules（官方推荐）
+;; https://go.dev/gopls/editor/emacs
+(require 'project)
+
+(defun project-find-go-module (dir)
+  "查找 Go module 根目录，排除 GOMODCACHE。
+  
+问题：如果打开 GOMODCACHE 中的依赖库，project.el 会把它识别为独立项目，
+导致 eglot 启动新的 gopls 实例，而不是复用主项目的服务器。
+
+解决：检测到 go.mod 在 GOMODCACHE 中时，返回 nil，不作为项目识别。
+这样 eglot-extend-to-xref 就能让依赖库文件复用主项目的 gopls。"
+  (when-let* ((root (locate-dominating-file dir "go.mod"))
+              (truename (file-truename root)))
+    (let ((gomodcache (or (getenv "GOMODCACHE")
+                          (expand-file-name "pkg/mod"
+                                            (or (getenv "GOPATH")
+                                                (expand-file-name "~/go"))))))
+      ;; 如果在 GOMODCACHE 中，不属于用户项目
+      (unless (and gomodcache
+                   (file-directory-p gomodcache)
+                   (file-in-directory-p truename (file-truename gomodcache)))
+        (cons 'go-module truename)))))
+
+(cl-defmethod project-root ((project (head go-module)))
+  "返回 Go module 项目的根目录。"
+  (cdr project))
+
+(add-hook 'project-find-functions #'project-find-go-module)
+#+end_src
+
+*** go-ts-mode + eglot
+
+**核心原理：eglot-extend-to-xref 的工作机制**
+
+当 =eglot-extend-to-xref = t= 时：
+
+1. 用户在项目代码中执行 =M-.= (xref-find-definitions)
+2. gopls 返回目标文件的 URI（可能是 =$GOMODCACHE= 或 =GOROOT=）
+3. eglot 将该文件路径和**当前 gopls 服务器**存入 =eglot--servers-by-xrefed-file= 哈希表
+4. 打开跳转后的文件时，eglot 检查该哈希表，自动复用原有的 gopls
+5. 结果：在依赖库/标准库中获得完整的 LSP 功能
+
+**为什么不能用自定义阻止逻辑？**
+
+之前的 =my/go-eglot-ensure= 会主动阻止依赖库启动 eglot，
+这破坏了 =eglot-extend-to-xref= 的机制，
+导致跳转到依赖库后无法继续跳转。
+
+**正确做法：直接使用 =eglot-ensure=**
+
+让 eglot 的内置机制自动处理跨项目跳转，
+配合 =project-find-go-module= 排除 GOMODCACHE，
+确保依赖库不会启动新的 gopls 实例。
+
+#+begin_src emacs-lisp
+(use-package go-ts-mode
+  :ensure nil
+  :mode ("\\.go\\'" . go-ts-mode)     ; .go 文件自动用 go-ts-mode
+  :hook (go-ts-mode . eglot-ensure)   ; 官方推荐，让 eglot-extend-to-xref 自动处理
+  :custom
+  (go-ts-mode-indent-offset 4))
+#+end_src
+*** 保存时格式化和整理 import
+#+begin_src emacs-lisp
+;; goimports：保存时格式化 + import 整理
+(use-package reformatter
+  :after go-ts-mode
+  :config
+  (reformatter-define go-format
+    :program "goimports")
+  (add-hook 'go-ts-mode-hook #'go-format-on-save-mode))
+#+end_src
+
+*** 测试支持（gotest）
+
+=gotest= 提供在 Emacs 中运行 Go 测试的能力：
+- 单个测试函数
+- 当前文件的所有测试
+- 当前包的测试
+- 整个项目的测试
+
+| 快捷键 | 命令 | 说明 |
+|--------|------|------|
+| =C-c t t= | go-test-current-test | 运行当前测试函数 |
+| =C-c t f= | go-test-current-file | 运行当前文件测试 |
+| =C-c t p= | go-test-current-project | 运行当前包测试 |
+| =C-c t P= | go-test-current-project-coverage | 运行测试并显示覆盖率 |
+| =C-c t r= | go-run | 运行 main 包 |
+
+#+begin_src emacs-lisp
+(use-package gotest
+  :ensure t
+  :after go-ts-mode
+  :bind (:map go-ts-mode-map
+              ("C-c t t" . go-test-current-test)
+              ("C-c t f" . go-test-current-file)
+              ("C-c t p" . go-test-current-project)
+              ("C-c t P" . go-test-current-project-coverage)
+              ("C-c t r" . go-run))
+  :custom
+  (go-test-verbose t))  ; 显示详细输出
+#+end_src
+
+*** Go Playground
+
+=go-playground= 允许直接在 Emacs 中分享代码到 go-play.org，
+或下载他人分享的代码片段。
+
+| 快捷键 | 命令 | 说明 |
+|--------|------|------|
+| =C-c e b= | go-play-buffer | 分享当前 buffer |
+| =C-c e r= | go-play-region | 分享选中区域 |
+| =C-c e d= | go-download-play | 下载 playground 代码 |
+
+#+begin_src emacs-lisp
+(use-package go-playground
+  :ensure t
+  :after go-ts-mode
+  :bind (:map go-ts-mode-map
+              ("C-c e b" . go-play-buffer)
+              ("C-c e r" . go-play-region)
+              ("C-c e d" . go-download-play)))
+#+end_src
+
+*** godoc 文档查看
+
+=godoc= 提供离线文档查看，=godoc-at-point= 查看光标处的符号文档。
+比 gopls hover 更适合阅读完整文档。
+
+| 快捷键 | 命令 | 说明 |
+|--------|------|------|
+| =C-h G= | godoc | 查询包文档 |
+| =C-c h= | godoc-at-point | 光标处符号文档 |
+
+#+begin_src emacs-lisp
+(use-package go-mode
+  :ensure t
+  :after go-ts-mode
+  :bind (:map go-ts-mode-map
+              ("C-c h" . godoc-at-point)
+         :map help-map
+              ("G" . godoc)))
+#+end_src
+
+*** go.mod 文件支持
+
+Emacs 30 内置 =go-mod-ts-mode=，为 go.mod 文件提供语法高亮。
+
+#+begin_src emacs-lisp
+(use-package go-mod-ts-mode
+  :ensure nil
+  :mode ("/go\\.mod\\'" . go-mod-ts-mode))
+#+end_src
+
+*** CamelCase 编辑支持
+
+Go 使用驼峰命名，=subword-mode= 让 =M-f= / =M-b= 按驼峰分词移动，
+而不是整个标识符。
+
+#+begin_src emacs-lisp
+(add-hook 'go-ts-mode-hook #'subword-mode)
+#+end_src
+
+** eglot：LSP 客户端（基础配置）
+
+=eglot= 是 Emacs 29+ 内置的 LSP 客户端。以下配置适用于所有语言——
+只设全局参数，不绑定到具体语言。
+
+**核心设置说明：**
+
+| 设置                       | 值       | 作用                              |
+|----------------------------+----------+-----------------------------------|
+| =eglot-request-timeout=    | 120      | 大项目首次索引时避免 Timeout              |
+| =eglot-events-buffer-size= | 2000000  | 事件日志 2MB，出问题时能排查              |
+| =eglot-autoshutdown=       | nil      | 不自动关闭（用自定义函数管理资源）     |
+| =eglot-send-changes-idle-time= | 0.2  | 同步代码延迟，快速送达 LSP（默认 0.5s）    |
+| =eglot-extend-to-xref=     | t        | **关键**：让跳转到依赖/标准库时复用当前 gopls |
+
+**为什么 =eglot-autoshutdown = nil=？**
+
+默认的 =autoshutdown= 会在关闭最后一个项目 buffer 时关闭 gopls，
+但这会导致：
+- 如果通过 xref 跳转到依赖库，关闭主项目 buffer 后 gopls 会被关闭
+- 依赖库的 buffer 失去 LSP 支持
+
+解决方案：
+- 关闭自动关闭，用自定义函数 =my/eglot-cleanup-xref-servers= 管理资源
+- 在关闭 buffer 时检查是否还有其他 buffer 在使用同一个 gopls
+- 如果没有，才释放资源
+
+**gopls workspace 配置关键参数：**
+
+| 参数                   | 推荐值         | 说明                              |
+|------------------------+----------------+-----------------------------------|
+| =directoryFilters=     | 排除无关目录    | 减少索引负担，加速启动              |
+| =diagnosticsDelay=     | "500ms"        | 诊断延迟，平衡响应和性能            |
+| =completeUnimported=   | t              | 补全未导入的包                    |
+| =deepCompletion=       | t              | 深度补全（可选，可能影响性能）        |
+| =usePlaceholders=      | t              | 补全时显示 ${1:placeholder}       |
+| =staticcheck=          | t              | 启用 staticcheck 静态分析          |
+| =matcher=              | "Fuzzy"        | Fuzzy 匹配（比 CaseSensitive 更灵活）|
+| =symbolScope=          | "all"          | workspace/symbol 搜索所有加载的包   |
+| =importShortcut=       | "Both"         | import 语句支持跳转定义和文档        |
+
+#+begin_src emacs-lisp
+(use-package eglot
+  :ensure nil                         ; 内置包，不需要安装
+  :custom
+  (eglot-request-timeout 120)        ; 大项目索引超时 30s → 120s
+  (eglot-events-buffer-size 2000000)  ; 事件日志 2MB，出问题时用 M-x eglot-events-buffer 排查
+  (eglot-autoshutdown nil)           ; 不自动关闭，用自定义函数管理资源
+  (eglot-send-changes-idle-time 0.2) ; 同步代码延迟：默认 0.5s → 0.2s，快速送达 LSP
+  (eglot-extend-to-xref t)           ; 关键：M-. 跳到依赖/标准库源码时复用当前 gopls
+  :config
+  ;; 注册 Go 语言服务器（支持多种模式）
+  ;; 注意：这里使用列表形式，支持 go-ts-mode 和 go-mod-ts-mode
+  (add-to-list 'eglot-server-programs
+               '((go-ts-mode go-mod-ts-mode) . ("gopls")))
+  
+  ;; gopls workspace 配置
+  ;; 文档：https://github.com/golang/tools/blob/master/gopls/doc/settings.md
+  (setq-default eglot-workspace-configuration
+                '(:gopls
+                  ;; 排除无关目录（减少索引负担）
+                  (:directoryFilters ["-**/node_modules" "-vendor" "-third_party" "-.git" "-grpc-go-examples"]
+                   ;; 诊断延迟（平衡响应速度和性能）
+                   :diagnosticsDelay "500ms"
+                   ;; 补全设置
+                   :completeUnimported t        ; 补全未导入的包
+                   :deepCompletion t            ; 深度补全（可选）
+                   :usePlaceholders t           ; 显示 ${1:arg}
+                   :matcher "Fuzzy"             ; Fuzzy 匹配（推荐）
+                   ;; 符号搜索范围
+                   :symbolScope "all"           ; 搜索所有加载的包
+                   ;; import 语句行为
+                   :importShortcut "Both"       ; 支持跳转定义和文档
+                   ;; 静态分析
+                   :staticcheck t               ; 启用 staticcheck（可选）
+                   :vulncheck "Off"             ; 漏洞检查（按需开启）
+                   ;; 分析器
+                   :analyses (:unusedparams t
+                              :unusedwrite t
+                              :shadow t))))
+  
+  ;; 注册其他语言服务器
+  (add-to-list 'eglot-server-programs
+               '(json-ts-mode . ("vscode-json-languageserver" "--stdio")))
+  (add-to-list 'eglot-server-programs
+               '(yaml-ts-mode . ("yaml-language-server" "--stdio")))
+  (add-to-list 'eglot-server-programs
+               '(lua-ts-mode . ("lua-language-server")))
+  
+  ;; ========== 资源管理：自动清理不再需要的 gopls 实例 ==========
+  ;;
+  ;; 问题：eglot-extend-to-xref 会让依赖库文件复用主项目的 gopls，
+  ;; 但当关闭主项目 buffer 后，gopls 仍在运行，占用资源。
+  ;;
+  ;; 解决：在关闭 buffer 时检查：
+  ;; 1. 当前 buffer 是否是通过 xref 打开的非项目文件
+  ;; 2. 是否还有其他 buffer 在使用同一个 gopls 服务器
+  ;; 3. 如果没有，则关闭该服务器，释放资源
+  ;;
+  (defun my/eglot-cleanup-xref-servers ()
+    "清理不再需要的 xref 关联的服务器。
+    
+当关闭通过 xref 跳转打开的依赖库/标准库 buffer 时，
+检查是否还有其他 buffer 在使用同一个 gopls 服务器。
+如果没有，则关闭服务器，释放资源。"
+    (when-let ((server (eglot-current-server)))
+      ;; 检查当前 buffer 是否属于某个项目
+      (let ((project (eglot--current-project)))
+        ;; 如果当前 buffer 不属于任何项目（依赖库/标准库）
+        ;; 且是通过 xref 打开的
+        (unless (and project (project-root project))
+          ;; 查找所有使用这个服务器的 buffer
+          (let ((buffers-using-server
+                 (cl-remove-if-not
+                  (lambda (buf)
+                    (with-current-buffer buf
+                      (and (eglot-current-server)
+                           (eq (eglot-current-server) server))))
+                  (buffer-list))))
+            ;; 如果只有当前 buffer 在使用，关闭服务器
+            (when (= (length buffers-using-server) 1)
+              (message "关闭不再使用的 gopls 服务器 (PID: %s)"
+                       (process-id (jsonrpc--process server)))
+              (eglot-shutdown server)))))))
+  
+  (add-hook 'kill-buffer-hook #'my/eglot-cleanup-xref-servers)
+  
+  ;; ========== 调试工具 ==========
+  ;;
+  ;; 检查 eglot-extend-to-xref 是否正常工作
+  ;; 用法：M-x my/eglot-show-xref-servers
+  ;;
+  (defun my/eglot-show-xref-servers ()
+    "显示当前所有 xref 关联的服务器。
+    
+用于调试 eglot-extend-to-xref 是否正常工作。
+如果跳转到依赖库后此列表为空，说明 xref 机制未生效。"
+    (interactive)
+    (if (boundp 'eglot--servers-by-xrefed-file)
+        (let ((count (hash-table-count eglot--servers-by-xrefed-file)))
+          (message "Xref 关联的服务器数量: %d" count)
+          (when (> count 0)
+            (maphash
+             (lambda (file server)
+               (message "  %s -> PID:%s"
+                        (file-name-nondirectory file)
+                        (process-id (jsonrpc--process server))))
+             eglot--servers-by-xrefed-file)))
+      (message "eglot--servers-by-xrefed-file 未定义（eglot 可能未加载）"))))
+#+end_src
+
+
+** JSON
+
+Emacs 30 内置 =json-ts-mode=。tree-sitter 语法库已由系统安装（=tree-sitter-json=）。
+
+如果需要 LSP 支持（自动补全、schema 校验），安装：
+= npm install -g vscode-json-languageserver=
+
+#+begin_src emacs-lisp
+(use-package json-ts-mode
+  :ensure nil
+  :mode ("\\.json\\'" . json-ts-mode)
+  :custom
+  (json-ts-mode-indent-offset 2))
+#+end_src
+
+** YAML
+
+Emacs 30 内置 =yaml-ts-mode=。tree-sitter 语法库需手动安装，
+在此之前回退到 MELPA 的 =yaml-mode=。
+
+格式化使用 =yamlfmt=（Go 二进制，=go install= 获取）。
+
+#+begin_src emacs-lisp
+(use-package yaml-mode
+  :ensure t                          ; MELPA 包
+  :mode ("\\.ya?ml\\'" . yaml-mode)  ; 关联 .yaml/.yml
+  :hook (yaml-mode . eglot-ensure)   ; 可选：有 LSP server 时自动启动
+  :custom
+  (yaml-mode-indent-offset 2))
+
+;; yamlfmt：保存时格式化
+(use-package reformatter
+  :after yaml-mode
+  :config
+  (reformatter-define yaml-format
+    :program "yamlfmt"
+    :args '("-"))
+  (add-hook 'yaml-mode-hook 'yaml-format-on-save-mode))
+#+end_src
+
+** SQL
+
+=sql-mode= 是 Emacs 内置的 SQL 编辑模式。没有 tree-sitter 模式。
+连接到具体数据库（MySQL、PostgreSQL 等）时可进一步配置。
+
+#+begin_src emacs-lisp
+(use-package sql
+  :ensure nil                         ; 内置包
+  :custom
+  (sql-indent-offset 4))             ; 4 格缩进
+#+end_src
+
+** Lua
+
+Emacs 30 内置 =lua-ts-mode=。tree-sitter 语法库已由系统安装（=tree-sitter-lua=）。
+
+LSP 服务器推荐： =sudo pacman -S lua-language-server=
+
+#+begin_src emacs-lisp
+(use-package lua-ts-mode
+  :ensure nil
+  :mode ("\\.lua\\'" . lua-ts-mode)
+  :hook (lua-ts-mode . eglot-ensure) ; 打开 .lua 时自动启动 LSP
+  :custom
+  (lua-ts-mode-indent-offset 2))
+#+end_src
+
+** Markdown
+
+=markdown-mode= 是 Markdown 编辑的标准包，提供语法高亮、
+折叠、预览和导出。关联 =.md= / =.markdown= 文件。
+
+#+begin_src emacs-lisp
+(use-package markdown-mode
+  :ensure t
+  :mode ("\\.md\\'" . markdown-mode)
+  :custom
+  (markdown-command "pandoc"))  ; 用 pandoc 渲染预览
+#+end_src

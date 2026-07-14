@@ -1,0 +1,76 @@
+#+title: ui
+#+property: header-args:emacs-lisp  :tangle ../lisp/ui.el :results silent
+
+* 基础界面
+:PROPERTIES:
+:CUSTOM_ID: ui
+:END:
+
+决定 Emacs 长什么样的配置：主题、字体、界面元素。
+
+** 主题
+
+Emacs 的主题决定了所有面的颜色（背景、字体、语法高亮等）。
+一次只能激活一个主题，加载前需要禁用旧的。
+
+#+begin_src emacs-lisp
+(use-package doom-themes
+  :ensure t
+  :custom
+  (doom-themes-enable-bold t)
+  (doom-themes-enable-italic t)
+  :config
+  (load-theme 'doom-tokyo-night t)
+  (doom-themes-visual-bell-config)
+  (doom-themes-org-config))
+#+end_src
+
+** 字体
+
+Emacs 可以分别为不同字符集指定字体：
+- 默认字体：等宽，用于代码（JetBrainsMono Nerd Font）
+- CJK 字体：用于中文/日文/韩文（Noto Sans CJK）
+- 可变宽度字体：用于文档模式
+
+字体大小用 =:height= 指定，单位是十分之一 point（例如 140 = 14pt）。
+
+#+begin_src emacs-lisp
+(set-face-attribute 'default nil :font "Iosevka" :height 140)
+#+end_src
+
+** 界面元素
+
+Emacs 默认显示工具栏、菜单栏、滚动条——这些在 GUI 下可以全部关掉，
+把屏幕空间全留给内容。终端 Emacs 下它们本来就不显示。
+
+=tool-bar-mode= / =menu-bar-mode= / =scroll-bar-mode= 各有一个 global minor mode，
+参数 = -1= 表示关闭 .= -1= 表示关闭。
+
+#+begin_src emacs-lisp
+(scroll-bar-mode -1)        ; Disable visible scrollbar
+(tool-bar-mode -1)          ; Disable the toolbar
+(tooltip-mode -1)           ; Disable tooltips
+(set-fringe-mode 10)        ; Give some breathing room
+(menu-bar-mode -1)          ; Disable the menu bar
+(setq visible-bell t)       ; Set up the visible bell
+(setq inhibit-startup-screen t)        ; 跳过欢迎界面，直接进 scratch
+(setq initial-scratch-message
+      ";; Welcome singdile, let's do something.\n\n")
+;; 解绑 C-\：系统级 fcitx5 用 C-\ 切换输入法，
+;; Emacs 默认也绑了 C-\ 到 toggle-input-method，两者冲突。
+;; 这里让 Emacs 让路，交给 fcitx5 处理。
+(global-unset-key (kbd "C-\\"))
+;; breadcrumb：顶部文件路径导航（eglot 同作者）
+(use-package breadcrumb
+  :ensure t
+  :config
+  (breadcrumb-mode 1)
+  ;; 去掉边框和背景色，低调融入
+  ;; 用 :inherit default 代替 (face-background 'default)
+  ;; 前者在终端帧创建时能正常解析，后者在 daemon 启动时返回 "unspecified-bg"
+  (set-face-attribute 'header-line nil
+                      :box nil
+                      :inherit 'default
+                      :foreground "#7a7a7a"
+                      :height 0.9))
+#+end_src

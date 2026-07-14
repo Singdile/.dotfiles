@@ -1,0 +1,63 @@
+#+title: vc
+#+property: header-args:emacs-lisp  :tangle ../lisp/vc.el :results silent
+
+* 版本控制（Magit）
+:PROPERTIES:
+:CUSTOM_ID: vc
+:END:
+
+Magit 是 Emacs 的 Git 客户端，不是一个 GUI wrapper——
+它是一个让你在 Emacs 里用文本界面做所有 Git 操作的工具。
+
+**和 shell 的区别：** git CLI 的操作粒度过大（=add . = → 全部提交），
+magit 用区块/行级粒度操作：选中某一行代码、按 =s= 单独暂存。
+
+**核心入口： =C-x g= **
+
+按 =C-x g= 打开 magit 状态缓冲区，这就是你的"Git 仪表盘"。
+这里显示当前仓库的：
+- 未暂存修改（Unstaged changes）
+- 已暂存修改（Staged changes）
+- 最近的提交历史
+- 未推送的提交
+- 所有分支和 tag
+
+**在 magit 状态缓冲区里的操作（单键）：**
+
+| 键 | 命令 | 做什么 |
+|----|------|--------|
+| =g= | 刷新 | 刷新当前状态（等同于 =git status=） |
+| =s= | stage | 暂存光标所在文件或区块 |
+| =u= | unstage | 取消暂存 |
+| =S= | stage all | 暂存所有修改 |
+| =U= | unstage all | 取消所有暂存 |
+| =c c= | commit | 提交已暂存的修改（弹出 commit message 编辑） |
+| =c a= | amend | 修改上一次提交 |
+| =p p= | push | 推送到远程 |
+| =F u= | pull | 从远程拉取 |
+| =b b= | checkout | 切换分支 |
+| =b c= | new branch | 创建并切换到新分支 |
+| =b l= | list branches | 查看所有分支（按 =RET= 切换） |
+| =l l= | log | 查看完整提交历史 |
+| =l o= | log current | 查看当前分支的提交历史 |
+| =d d= | diff | 查看工作区与 HEAD 的差异 |
+| =d s= | diff staged | 查看暂存区与 HEAD 的差异 |
+| =k= | discard | 放弃光标所在处的修改 |
+| =z z= | stash | 暂存工作区 |
+| =z p= | stash pop | 恢复暂存 |
+| =x= | reset | 软重置（保留工作区修改） |
+| =q= | quit | 关闭 magit 缓冲区 |
+
+**区块（hunk）级别的暂存：** 在 diff 视图里，光标放在任意行，
+按 =s= 只暂存这一个修改区块——不需要 =git add -p= 那套交互式界面。
+这是 magit 最让人上瘾的功能。
+
+**和 projectile 的关系：** magit 自动识别当前仓库的根目录，
+和 projectile 的项目边界一致。在一个 Go 项目里， =C-x p f=
+找文件， =C-x g= 做 git 操作——两个前缀各司其职。
+
+#+begin_src emacs-lisp
+(use-package magit
+  :ensure t
+  :bind ("C-x g" . magit-status))  ; C-x g：社区事实标准
+#+end_src

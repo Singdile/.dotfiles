@@ -1,0 +1,29 @@
+#+title: misc
+#+property: header-args:emacs-lisp  :tangle ../lisp/misc.el :results silent
+
+* 杂项
+:PROPERTIES:
+:CUSTOM_ID: misc
+:END:
+
+放一些不属于上述任何分类但又有用的配置：
+
+ - =recentf-mode=：记住最近打开的文件，=recentf-open-files= 快速访问
+ - =savehist-mode=：保存 minibuffer 历史，跨会话记住 M-x 输入
+ - =save-place-mode=：记住每个文件的上次光标位置
+ - 备份文件集中到 =~/.emacs.d/backups/=，自动保存文件集中到 =~/.emacs.d/auto-save/=，不污染工作目录
+
+#+begin_src emacs-lisp
+(make-directory (expand-file-name "backups" user-emacs-directory) t)
+(make-directory (expand-file-name "auto-save" user-emacs-directory) t)
+
+(setq backup-directory-alist `(("." . ,(expand-file-name "backups" user-emacs-directory))))
+(setq backup-by-copying t)
+(setq version-control t)
+(setq kept-new-versions 6)
+(setq kept-old-versions 2)
+(setq delete-old-versions t)
+
+(setq auto-save-file-name-transforms
+      `((".*" ,(expand-file-name "auto-save" user-emacs-directory) t)))
+#+end_src

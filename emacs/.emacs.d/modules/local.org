@@ -1,0 +1,19 @@
+#+title: local
+#+property: header-args:emacs-lisp  :tangle ../lisp/local.el :results silent
+
+* Local 配置（可选)
+:PROPERTIES:
+:CUSTOM_ID: local
+:END:
+
+如果将来有不想放进版本控制的个人配置（例如包含路径、密钥等），
+可以放在 =lisp/init-local.el= 中，加入 =.gitignore=。
+
+这个代码块在最后加载，所以 =init-local.el= 可以覆盖前面的任何设置。
+
+#+begin_src emacs-lisp
+;; 加载 gitignored 的个人额外配置（不在版本控制中的）
+(let ((local-file (expand-file-name "lisp/init-local.el" user-emacs-directory)))
+  (when (file-exists-p local-file)
+    (load local-file)))
+#+end_src

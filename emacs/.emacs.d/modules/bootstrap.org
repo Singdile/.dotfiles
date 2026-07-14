@@ -1,0 +1,129 @@
+#+title: bootstrap
+#+property: header-args:emacs-lisp  :tangle ../lisp/bootstrap.el :results silent
+
+* 初始化设置
+:PROPERTIES:
+:CUSTOM_ID: bootstrap
+:END:
+
+所有 Emacs 配置的第一步：设定包来源、安装包管理器、处理自定义变量。
+这部分代码在所有其他模块之前执行，是配置的"地基"。
+
+** 包管理器
+
+Emacs 内置了 =package.el=，只需指定从哪里下载包。
+三个源各有侧重：
+
+| 源 | 地址 | 说明 |
+|----|------|------|
+| GNU ELPA | elpa.gnu.org | Emacs 官方维护，包最少但最稳定 |
+| NonGNU ELPA | elpa.nongnu.org | 不开 GPL 但品质可靠的包 |
+| MELPA | melpa.org | 社区最大源，几乎什么都有 |
+
+=package-initialize= 加载已安装包的 autoload，让它们的关键函数可用。
+=package-user-dir= 不显式指定时默认是 =~/.emacs.d/elpa/=。
+
+#+begin_src emacs-lisp
+(require 'package)
+(setq package-check-signature nil)  ; 跳过签名验证
+
+;; Emacs 30 tar-mode 兼容：用系统 tar 命令代替内置 tar-mode
+(defun my/tar-untar-buffer (dir)
+  (let ((tar-file (make-temp-file "emacs-pkg-" nil ".tar"))
+        (default-directory (expand-file-name dir package-user-dir)))
+    (write-region (point-min) (point-max) tar-file nil 'silent)
+    (make-directory default-directory t)
+    (with-temp-buffer
+      (call-process "tar" nil t nil "xf" tar-file "--strip-components=1" "-C" default-directory)
+      (delete-file tar-file))))
+(defalias 'package-untar-buffer #'my/tar-untar-buffer)
+
+(setq package-archives
+      '(("gnu"    . "https://elpa.gnu.org/packages/")
+        ("nongnu" . "https://elpa.nongnu.org/nongnu/")
+        ("melpa"  . "https://melpa.org/packages/")))
+(package-initialize)
+;; 确保 Emacs 能找到 Go 工具链（从桌面启动时 PATH 不完整）
+(use-package exec-path-from-shell
+  :ensure t
+  :config
+  (setq exec-path-from-shell-variables '("PATH" "MANPATH" "GOPATH" "GOMODCACHE"))
+  (exec-path-from-shell-initialize))
+#+end_src
+
+** 垃圾回收优化（GC）
+
+Emacs 默认的 GC 阈值只有 80KB，写代码时频繁触发垃圾回收会导致卡顿。
+使用 =gcmh= 包动态管理：打字时不 GC，空闲时才悄悄回收。
+
+| 设置 | 值 | 作用 |
+|------|-----|------|
+| =gc-cons-threshold= | 100MB | 启动临时阈值 |
+| =gcmh-high-cons-threshold= | 100MB | 打字时不频繁 GC |
+| =gcmh-low-cons-threshold= | 50MB | 空闲时触发清理 |
+| =gcmh-idle-delay= | 10秒 | 停手 10 秒后开始 GC |
+
+#+begin_src emacs-lisp
+;; 启动时设置合理阈值
+(setq gc-cons-threshold (* 100 1024 1024))  ; 100MB
+
+(use-package gcmh
+  :ensure t
+  :custom
+  (gcmh-high-cons-threshold (* 100 1024 1024))  ; 打字时 100MB
+  (gcmh-low-cons-threshold (* 50 1024 1024))    ; 空闲时 50MB
+  (gcmh-idle-delay 10)                          ; 空闲 10 秒后开始 GC
+  :init
+  (gcmh-mode 1))
+#+end_src
+
+** use-package
+
+=use-package= 是 Emacs 配置的事实标准。它的核心价值：
+- 声明式语法：一个 =use-package= 块包含安装、加载、配置、快捷键
+- 延迟加载：通过 =:defer= / =:commands= / =:mode= 等关键字控制加载时机
+- 统一入口：不管包来自哪里，写法一致
+
+|=:ensure t= 表示如果包未安装，自动从 MELPA 安装。
+|这里设成 =nil=（默认不自动安装），每个需要安装的包显式写 =:ensure t=。
+|干净环境第一次启动时，建议临时打开或改为 =t=，
+|下载完所有包后再切回 =nil=，防止后续 MELPA 波动导致启动失败。
+
+#+begin_src emacs-lisp
+(unless (package-installed-p 'use-package)
+  (package-refresh-contents)
+  (package-install 'use-package))
+(eval-when-compile
+  (require 'use-package))
+(setq use-package-always-ensure nil)
+#+end_src
+
+** 加载 custom.el
+
+Emacs 的 =M-x customize= 界面会把设置自动写入 =custom-file=。
+把它单独存放而不是混在 =config.org= 中，保持手写配置和自动生成配置的隔离。
+
+#+begin_src emacs-lisp
+(setq custom-file (expand-file-name "custom.el" user-emacs-directory))
+(when (file-exists-p custom-file)
+  (load custom-file))
+#+end_src
+
+** 网络代理
+
+Emacs 的网络请求（如下载包、eglot 连接服务器）可能需要通过代理访问。
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| http | 127.0.0.1:7890 | HTTP 代理地址 |
+| https | 127.0.0.1:7890 | HTTPS 代理地址 |
+| no_proxy | .cn, localhost | 不走代理的地址 |
+
+#+begin_src emacs-lisp
+(use-package url
+  :config
+  (setq url-proxy-services
+        '(("http" . "127.0.0.1:7897")
+          ("https" . "127.0.0.1:7897")
+          ("no_proxy" . "^.*\\.cn\\|localhost\\|127\\.0\\.0\\.1"))))
+#+end_src

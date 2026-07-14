@@ -1,0 +1,63 @@
+#+title: projects
+#+property: header-args:emacs-lisp  :tangle ../lisp/projects.el :results silent
+
+* 项目管理
+:PROPERTIES:
+:CUSTOM_ID: projects
+:END:
+
+=projectile= 是 Emacs 里最流行的项目管理工具。一个"项目"就是
+包含 =go.mod=、=.git= 或 =projectile= 标记文件的目录。
+打开该目录下任意文件 → projectile 自动识别项目边界。
+
+此后所有操作都在项目范围内进行：找文件只在项目内找、
+切换 buffer 只列出项目内的 buffer、搜索只搜索项目目录。
+
+**基本概念：**
+
+- 不需要手动"打开项目"——打开项目目录下任意文件就自动激活
+- =C-x p= 是 projectile 的命令前缀（Emacs 28+ 标准项目前缀）
+- 所有子命令在 =C-x p= 后按单键触发
+- 在 minibuffer 里仍然享受 vertico + orderless 补全
+
+**常用操作：**
+
+| 快捷键 | 命令 | 做什么 |
+|--------|------|--------|
+| =C-x p f= | =projectile-find-file= | 在项目内按文件名查找文件 |
+| =C-x p b= | =projectile-switch-to-buffer= | 只在项目 buffer 间切换 |
+| =C-x p d= | =projectile-find-dir= | 在项目内查找目录 |
+| =C-x p p= | =projectile-switch-project= | 切换到另一个项目 |
+| =C-x p s r= | =projectile-ripgrep= | 在项目内递归搜索文本（底层用 ripgrep） |
+| =C-x p k= | =projectile-kill-buffers= | 关闭当前项目的所有 buffer |
+| =C-x p ! = | =projectile-run-shell-command-in-root= | 在项目根目录执行 shell 命令 |
+| =C-x p e= | =projectile-find-references= | 查找当前函数/变量的引用 |
+| =C-x p R= | =projectile-replace= | 在项目内搜索并替换 |
+| =C-x p t= | =projectile-toggle-between-implementation-and-test= | Go 文件 ↔ 测试文件切换 |
+
+**项目类型自动检测：**
+
+projectile 根据项目根目录的文件自动判断语言类型：
+- 找到 =go.mod= → Go 项目
+- 找到 =package.json= → Node.js 项目
+- 找到 =.git= → 通用 git 项目
+
+检测出的类型决定了某些命令的行为。
+比如 Go 项目的 =C-c p t= 知道跳转到 =_test.go=。
+
+**缓存：** projectile 首次打开项目时会扫描所有文件建索引，
+几万文件的大项目可能慢一两秒。之后文件操作都是缓存即时响应。
+如果新增了文件，=C-x p f= 里按 =C-u= 强制刷新缓存。
+
+#+begin_src emacs-lisp
+(use-package projectile
+  :ensure t
+  :diminish projectile-mode
+  :config
+  (projectile-mode 1)
+  ;; 缓存设置
+  (setq projectile-enable-caching t)     ; 启用文件索引缓存
+  (setq projectile-indexing-method 'hybrid) ; 混合索引：git + 文件系统
+  ;; 用 vertico/consult/marginalia 补全框架（你当前的配置栈）
+  (setq projectile-completion-system 'auto))
+#+end_src

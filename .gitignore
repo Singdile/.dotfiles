@@ -1,5 +1,12 @@
-# Only config.org is tracked
-emacs/.emacs.d/init.el
+# Generated files (do not track)
 emacs/.emacs.d/config.el
 emacs/.emacs.d/config.elc
 emacs/.emacs.d/config.org~
+emacs/.emacs.d/custom.el
+emacs/.emacs.d/elpa/
+emacs/.emacs.d/lisp/
+emacs/.emacs.d/backups/
+emacs/.emacs.d/auto-save/
+emacs/.emacs.d/org-roam.db
+*~
+*.elc
