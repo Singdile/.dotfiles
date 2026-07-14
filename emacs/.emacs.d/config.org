@@ -55,21 +55,21 @@ Emacs 默认的 GC 阈值只有 80KB，写代码时频繁触发垃圾回收会�
 
 | 设置 | 值 | 作用 |
 |------|-----|------|
-| =gc-cons-threshold= | 1GB | 开发期间几乎不 GC |
-| =gcmh-high-cons-threshold= | 1GB | 打字时保持高阈值 |
-| =gcmh-low-cons-threshold= | 200MB | 空闲时降到 200MB 触发清理 |
-| =gcmh-idle-delay= | 15秒 | 停手 15 秒后才开始 GC |
+| =gc-cons-threshold= | 100MB | 启动临时阈值 |
+| =gcmh-high-cons-threshold= | 100MB | 打字时不频繁 GC |
+| =gcmh-low-cons-threshold= | 50MB | 空闲时触发清理 |
+| =gcmh-idle-delay= | 10秒 | 停手 10 秒后开始 GC |
 
 #+begin_src emacs-lisp
-;; 启动时设置高阈值，避免初始化期间的 GC
-(setq gc-cons-threshold (* 1024 1024 1024))  ; 1GB
+;; 启动时设置合理阈值
+(setq gc-cons-threshold (* 100 1024 1024))  ; 100MB
 
 (use-package gcmh
   :ensure t
   :custom
-  (gcmh-high-cons-threshold (* 1024 1024 1024))  ; 打字时 1GB
-  (gcmh-low-cons-threshold (* 200 1024 1024))    ; 空闲时 200MB（清理更轻量）
-  (gcmh-idle-delay 15)                           ; 空闲 15 秒后才开始 GC
+  (gcmh-high-cons-threshold (* 100 1024 1024))  ; 打字时 100MB
+  (gcmh-low-cons-threshold (* 50 1024 1024))    ; 空闲时 50MB
+  (gcmh-idle-delay 10)                          ; 空闲 10 秒后开始 GC
   :init
   (gcmh-mode 1))
 #+end_src
