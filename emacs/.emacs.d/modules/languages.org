@@ -422,6 +422,60 @@ LSP 服务器推荐： =sudo pacman -S lua-language-server=
 (use-package markdown-mode
   :ensure t
   :mode ("\\.md\\'" . markdown-mode)
+  :hook (markdown-mode . my/markdown-mode-setup)
   :custom
-  (markdown-command "pandoc"))  ; 用 pandoc 渲染预览
+  (markdown-command "pandoc")
+  (markdown-header-scaling t)
+  (markdown-hide-markup t)
+  :config
+  (defun my/markdown-mode-setup ()
+    (visual-line-mode 1)
+    (variable-pitch-mode 1)
+    (setq-local line-spacing 0.3))
+  (dolist (pair '((markdown-header-face-1 . 1.4)
+                  (markdown-header-face-2 . 1.2)
+                  (markdown-header-face-3 . 1.1)
+                  (markdown-header-face-4 . 1.0)))
+    (set-face-attribute (car pair) nil :height (cdr pair))))
+#+end_src
+
+** Protobuf
+
+protobuf-ts-mode（tree-sitter 语法高亮）+ buf format（保存时格式化）。
+无需 LSP，proto 文件结构简单，buf format 已满足格式化需求。
+
+*** 前置依赖
+
+- MELPA 包： =M-x package-install RET protobuf-ts-mode RET=（已安装）
+- tree-sitter 语法： =M-x treesit-install-language-grammar RET proto RET=（已安装）
+- buf 二进制： =go install github.com/bufbuild/buf/cmd/buf@latest= （=mise= 已托管）
+
+*** protobuf-ts-mode + buf format
+
+- =*.proto= → protobuf-ts-mode
+- 2 空格缩进（protobuf 惯例）
+- subword-mode 处理 snake_case / CamelCase
+- buf format 保存时格式化
+
+#+begin_src emacs-lisp
+(use-package protobuf-ts-mode
+  :ensure t
+  :mode ("\\.proto\\'" . protobuf-ts-mode)
+  :hook (protobuf-ts-mode . subword-mode)
+  :custom
+  (protobuf-ts-mode-indent-offset 2))
+
+;; buf format 保存后格式化（buf format 不支持 stdin，故不用 reformatter）
+;; 文件写入磁盘后，buf format -w 改写文件，再 revert-buffer 加载到 buffer
+(defun my/protobuf-format ()
+  "Use buf format to format current proto buffer after save."
+  (when-let ((file (buffer-file-name)))
+    (let ((default-directory (file-name-directory file)))
+      (when (zerop (call-process "buf" nil '(nil "/dev/null") nil
+                                 "format" "-w" file))
+        (revert-buffer t t t)))))
+
+(add-hook 'protobuf-ts-mode-hook
+          (lambda ()
+            (add-hook 'after-save-hook #'my/protobuf-format nil t)))
 #+end_src

@@ -6,7 +6,12 @@ emacs/.emacs.d/custom.el
 emacs/.emacs.d/elpa/
 emacs/.emacs.d/lisp/
 emacs/.emacs.d/backups/
-emacs/.emacs.d/auto-save/
+emacs/.emacs.d/auto-save-list/
+emacs/.emacs.d/eln-cache/
 emacs/.emacs.d/org-roam.db
+emacs/.emacs.d/projectile-*
+emacs/.emacs.d/.org-id-locations
+emacs/.emacs.d/tree-sitter/
+\#*\#
 *~
 *.elc

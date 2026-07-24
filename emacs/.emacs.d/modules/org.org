@@ -43,6 +43,61 @@
   (add-to-list 'org-structure-template-alist pair))
 #+end_src
 
+** LaTeX 导出与预览
+
+#+begin_src emacs-lisp
+(require 'ox-latex)
+
+;; xelatex 编译器（原生支持 Unicode/中文）
+(setq org-latex-compiler "xelatex")
+
+;; 两次编译确保交叉引用正确
+(setq org-latex-pdf-process
+      '("xelatex -shell-escape -interaction nonstopmode -output-directory %o %f"
+        "xelatex -shell-escape -interaction nonstopmode -output-directory %o %f"))
+
+;; 公式预览后端（C-c C-x C-l）
+(setq org-preview-latex-default-process 'dvisvgm)
+(setq org-format-latex-options
+      '(:foreground default :background default :scale 1.5
+        :html-foreground default :html-background default :html-scale 1.0
+        :matchers ("begin" "$1" "$" "$$" "\\(" "\\[")))
+
+;; xelatex 不需要 inputenc/fontenc，移除默认包
+(setq org-latex-default-packages-alist
+      (cl-remove-if (lambda (p)
+                      (member (car p) '("inputenc" "fontenc")))
+                    org-latex-default-packages-alist))
+
+;; 自定义中文 LaTeX 类
+(add-to-list 'org-latex-classes
+             '("xelatex-article"
+               "\\documentclass[11pt]{article}
+\\usepackage{fontspec}
+\\usepackage{xeCJK}
+\\setCJKmainfont{Noto Serif CJK SC}
+\\setCJKsansfont{Noto Sans CJK SC}
+\\setCJKmonofont{Noto Sans CJK SC}
+\\usepackage{amsmath,amssymb}
+\\usepackage[colorlinks=true,linkcolor=black,urlcolor=blue]{hyperref}
+\\usepackage{geometry}
+\\geometry{a4paper, margin=2.5cm}
+\\usepackage{fancyhdr}
+\\pagestyle{fancy}
+\\fancyhf{}
+\\fancyhead[L]{\\leftmark}
+\\fancyhead[R]{\\rightmark}
+\\fancyfoot[C]{\\thepage}"
+               ("\\section{%s}" . "\\section*{%s}")
+               ("\\subsection{%s}" . "\\subsection*{%s}")
+               ("\\subsubsection{%s}" . "\\subsubsection*{%s}")
+               ("\\paragraph{%s}" . "\\paragraph*{%s}")
+               ("\\subparagraph{%s}" . "\\subparagraph*{%s}")))
+
+;; 默认使用自定义类
+(setq org-latex-default-class "xelatex-article")
+#+end_src
+
 ** 标题美化（org-modern）
 
 #+begin_src emacs-lisp
@@ -84,10 +139,15 @@
 ** 启动时自动配置
 
 #+begin_src emacs-lisp
+(use-package adaptive-wrap
+  :ensure t
+  :hook (org-mode . adaptive-wrap-prefix-mode))
+
 (defun my/org-mode-setup ()
   (org-modern-mode 1)
   (valign-mode 1)
   (visual-line-mode 1)
+  (adaptive-wrap-prefix-mode 1)
   (setq-local line-spacing 0.3))
 
 (add-hook 'org-mode-hook 'my/org-mode-setup)

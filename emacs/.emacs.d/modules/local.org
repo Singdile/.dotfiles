@@ -17,3 +17,68 @@
   (when (file-exists-p local-file)
     (load local-file)))
 #+end_src
+
+* hexo markdown 转换
+:PROPERTIES:
+:CUSTOM_ID: hexo-markdown
+:END:
+
+在 dired 标记 org 文件后执行，批量导出为 hexo 兼容的 markdown 文章。
+
+#+begin_src emacs-lisp
+(defvar my/org-hexo-posts-dir "~/Work/my-blog/source/_posts/"
+  "hexo 文章输出目录，可在配置中覆盖。")
+
+(defun my/org-to-hexo-markdown (&optional files)
+  (interactive)
+  (require 'ox-md)
+  (let* ((org-files (or files (dired-get-marked-files)))
+         (posts-dir (expand-file-name my/org-hexo-posts-dir)))
+    (dolist (file org-files)
+      (when (string-suffix-p ".org" file)
+        (with-current-buffer (find-file-noselect file)
+          (org-mode)
+          (let* ((kws (org-collect-keywords
+                       '("TITLE" "DATE" "AUTHOR" "TAGS" "CATEGORIES")))
+                 (title    (cadr (assoc "TITLE" kws)))
+                 (date     (cadr (assoc "DATE" kws)))
+                 (author   (cadr (assoc "AUTHOR" kws)))
+                 (tags     (cadr (assoc "TAGS" kws)))
+                 (cats     (cadr (assoc "CATEGORIES" kws)))
+                 (clean-date (when date
+                               (replace-regexp-in-string
+                                "\\`\\[\\|\\]\\'" "" date)))
+                 (md-body (condition-case err
+                              (let ((org-export-with-toc nil)
+                                    (org-export-with-broken-links t))
+                                (org-export-as 'md nil nil t))
+                            (error
+                             (message "  ⚠ 导出失败: %s" (error-message-string err))
+                             nil)))
+                 (out (expand-file-name
+                       (concat (file-name-base file) ".md") posts-dir)))
+            (when md-body
+              (with-temp-file out
+                (insert "---\n")
+                (when title
+                  (insert (format "title: \"%s\"\n"
+                                  (replace-regexp-in-string "\"" "\\\\\"" title))))
+                (when clean-date
+                  (insert (format "date: %s\n" clean-date)))
+                (when author
+                  (insert (format "author: \"%s\"\n" author)))
+                (when tags
+                  (insert (format "tags: [%s]\n" tags)))
+                (when cats
+                  (insert (format "categories: [%s]\n" cats)))
+                (insert "---\n")
+                (insert md-body))
+              (kill-buffer)))
+          (message "✓ %s" (file-name-nondirectory file)))))
+    (when (called-interactively-p 'interactive)
+      (message "转换完成！共处理 %d 个文件" (length org-files)))))
+
+(with-eval-after-load 'dired
+  (define-key dired-mode-map (kbd "M-o h") nil)
+  (define-key dired-mode-map (kbd "M-o h") #'my/org-to-hexo-markdown))
+#+end_src
