@@ -1,3 +1,11 @@
+# Fcitx5 cache
+fcitx5/.config/fcitx5/conf/cached_layouts
+
+# Hyprland tangled outputs (source is config.org)
+hypr/.config/hypr/hyprland.lua
+hypr/.config/hypr/hyprlock.conf
+hypr/.config/hypr/hyprpaper.conf
+
 # Generated files (do not track)
 emacs/.emacs.d/config.el
 emacs/.emacs.d/config.elc

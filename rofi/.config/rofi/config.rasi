@@ -1,0 +1,89 @@
+/**
+ * Tokyo Night Theme for Rofi (Minimal Edition)
+ */
+
+configuration {
+    modi: "drun,run";
+    show-icons: true;
+    display-drun: "Search";
+    display-run: "Run";
+    drun-display-format: "{name}";
+    font: "JetBrainsMono Nerd Font 11";
+    icon-theme: "Papirus-Dark";
+}
+
+/* 全局默认样式 */
+* {
+    background-color: #1a1b26;
+    text-color: #c0caf5;
+}
+
+window {
+    background-color: #1a1b26;
+    width: 480px;
+    border-radius: 8px;
+    padding: 12px;
+    text-color: #c0caf5;
+}
+
+mainbox {
+    background-color: #1a1b26;
+    spacing: 8px;
+    text-color: #c0caf5;
+}
+
+listview {
+    background-color: #1a1b26;
+    lines: 8;
+    spacing: 2px;
+    text-color: #c0caf5;
+}
+
+/* 列表项样式 */
+element {
+    background-color: #1a1b26;
+    padding: 6px 8px;
+    border-radius: 4px;
+    spacing: 8px;
+    text-color: #c0caf5;
+}
+
+element normal {
+    background-color: #1a1b26;
+    text-color: #c0caf5;
+}
+
+element selected {
+    background-color: #24283b;
+    text-color: #bb9af7;
+}
+
+element urgent {
+    background-color: #1a1b26;
+    text-color: #f7768e;
+}
+
+/* 搜索框样式 */
+inputbar {
+    background-color: #24283b;
+    padding: 6px 8px;
+    border-radius: 6px;
+    text-color: #c0caf5;
+}
+
+prompt {
+    padding: 0 6px;
+    text-color: #565f89;
+}
+
+entry {
+    background-color: #24283b;
+    placeholder: "Search applications...";
+    placeholder-color: #565f89;
+    text-color: #c0caf5;
+}
+
+element-icon {
+    size: 16px;
+}
+@theme "/home/singdile/.local/share/rofi/themes/squared-everforest.rasi"

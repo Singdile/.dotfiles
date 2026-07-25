@@ -1,0 +1,11 @@
+{
+  // 内存模块配置
+  // 显示当前内存使用占比，使用百分比形式
+  "memory": {
+    "interval": 5,
+    "format": "MEM {percentage}%",
+    "format-alt": " {used:0.1f}GB / {total:0.1f}GB",
+    "tooltip": true,
+    "tooltip-format": "内存使用: {used:0.1f}GB / {total:0.1f}GB ({percentage}%)"
+  }
+}

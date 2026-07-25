@@ -1,0 +1,473 @@
+#+title: Hyprland 配置 (Lua)
+#+author: singdile
+#+startup: overview indent
+#+property: header-args:lua :tangle-mode (identity #o644) :comments no :padline no
+#+property: header-args:conf :tangle-mode (identity #o644) :comments no :padline no
+
+本文档用 Org 文学编程管理 Hyprland Lua 配置。
+Lua 代码块 tangle 到 =hyprland.lua。
+=hyprpaper= / =hyprlock= 用原生格式。
+
+* 主修饰键
+
+所有按键绑定共享的主修饰键（Win 键）。
+
+#+begin_src lua :tangle hyprland.lua
+local mainMod = "SUPER"
+#+end_src
+
+* NVIDIA 与环境变量
+
+NVIDIA 驱动需要特殊的环境变量以确保 Wayland 正常工作。
+
+| 变量 | 作用 |
+|------+------|
+| LIBVA_DRIVER_NAME | 硬件视频加速驱动 |
+| XDG_SESSION_TYPE | 声明 Wayland 会话类型 |
+| GBM_BACKEND | GBM 后端选择 nvidia-drm |
+| __GLX_VENDOR_LIBRARY_NAME | GLX 库供应商 |
+
+#+begin_src lua :tangle hyprland.lua
+-- NVIDIA 驱动
+hl.env("LIBVA_DRIVER_NAME", "nvidia")
+hl.env("XDG_SESSION_TYPE", "wayland")
+hl.env("GBM_BACKEND", "nvidia-drm")
+hl.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia")
+#+end_src
+
+** 应用缩放
+
+Qt 和 GTK 应用的缩放设置。Firefox 120+ 自动支持 Wayland 分数缩放。
+
+| 变量 | 作用 | 值 |
+|------+------+-----|
+| QT_QPA_PLATFORMTHEME | Qt 主题 | qt6ct |
+| ELECTRON_OZONE_PLATFORM_HINT | Electron 后端提示 | wayland |
+| GDK_SCALE | GTK 整数缩放 | 1 |
+| GDK_DPI_SCALE | GTK DPI 缩放 | 1 |
+| QT_SCALE_FACTOR | Qt 缩放因子 | 1 |
+| QT_FONT_DPI | Qt 字体 DPI | 96 |
+
+#+begin_src lua :tangle hyprland.lua
+-- 应用缩放
+hl.env("QT_QPA_PLATFORMTHEME", "qt6ct")
+hl.env("ELECTRON_OZONE_PLATFORM_HINT", "wayland")
+-- Firefox Wayland 分数缩放支持
+-- Hyprland 使用 wp_fractional_scale_v1 协议，Firefox 120+ 自动支持
+-- MOZ_ENABLE_WAYLAND=1 已在系统环境变量中设置
+hl.env("GDK_SCALE", "1")
+hl.env("GDK_DPI_SCALE", "1")
+hl.env("QT_SCALE_FACTOR", "1")
+hl.env("QT_FONT_DPI", "96")
+#+end_src
+
+* 输入法
+
+fcitx5 输入法配置。Wayland 下 GTK 应用使用原生 text-input 协议，不需要 GTK_IM_MODULE。
+
+| 变量 | 作用 | 值 |
+|------+------+-----|
+| QT_IM_MODULE | Qt 输入法模块 | fcitx |
+| GTK_IM_MODULE | GTK 输入法模块 | 空（Wayland 原生） |
+| XMODIFIERS | X11 输入法标识 | @im=fcitx |
+| SDL_IM_MODULE | SDL 输入法模块 | fcitx |
+| FCITX5_WAYLAND_IM | fcitx5 Wayland 支持 | 1 |
+
+#+begin_src lua :tangle hyprland.lua
+-- fcitx5 环境变量
+-- Wayland 下 GTK 应用使用原生 text-input 协议，不需要 GTK_IM_MODULE
+-- Qt 和 X11 应用仍需要 IM module
+hl.env("QT_IM_MODULE", "fcitx")
+-- unset GTK_IM_MODULE for Wayland native input method support
+hl.env("GTK_IM_MODULE", "")
+hl.env("XMODIFIERS", "@im=fcitx")
+hl.env("SDL_IM_MODULE", "fcitx")
+-- fcitx5 Wayland 支持
+hl.env("FCITX5_WAYLAND_IM", "1")
+#+end_src
+
+* 显示器
+
+** 缩放策略
+
+不同显示器根据物理尺寸和 DPI 设置合适的缩放比例。
+
+| 显示器 | 分辨率 | 物理尺寸 | DPI | 缩放 |
+|--------+--------+----------+-----+------|
+| eDP-1 (笔记本) | 1920x1080 | 14寸 (340x190mm) | ~157 DPI | 1.5 (高 DPI) |
+| HDMI-A-1 (外接) | 1920x1080 | 24寸 (530x300mm) | ~92 DPI | 1.0 (标准) |
+
+** 配置
+
+#+begin_src lua :tangle hyprland.lua
+-- 笔记本屏幕：
+hl.monitor({ output = "desc:AU Optronics 0xAF90",mode = "preferred", position = "auto", scale = 1.0 })
+-- 外接显示器：标准 DPI，无缩放
+hl.monitor({ output = "HDMI-A-1", mode = "preferred", position = "auto", scale = 1.0 })
+--任意屏幕
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1.0 })
+#+end_src
+
+* 设备配置
+
+光标：关闭硬件渲染（NVIDIA 兼容性）。
+输入：美式键盘 + 鼠标跟随焦点。
+绑定：允许工作区循环切换。
+
+| 参数 | 作用 | 值 |
+|------+------+-----|
+| no_hardware_cursors | 禁用硬件光标 | true |
+| kb_layout | 键盘布局 | us |
+| follow_mouse | 鼠标跟随焦点 | 1 (启用) |
+| allow_workspace_cycles | 工作区循环 | true |
+| workspace_back_and_forth | 工作区往返 | false |
+
+#+begin_src lua :tangle hyprland.lua
+hl.config({
+    general = {
+        layout = "dwindle",
+    },
+    cursor = {
+        no_hardware_cursors = true,
+    },
+    input = {
+        kb_layout = "us",
+        follow_mouse = 1,
+    },
+    binds = {
+        allow_workspace_cycles = true,
+        workspace_back_and_forth = false,
+    },
+    misc = {
+        always_follow_on_dnd = true,
+    },
+    scrolling = {
+        column_width = 0.85,
+        direction = "right",
+        fullscreen_on_one_column = true,
+    },
+})
+#+end_src
+
+* 自启动
+
+=hyprland.start= 事件在 Hyprland 完成初始化后触发。
+所有 =exec-cmd= 类型的自启动命令都应在此回调中执行。
+
+** 启动项列表
+
+| 程序 | 作用 | 延迟 |
+|------+------+------|
+| fcitx5 | 输入法守护进程 | 无 |
+| dbus-update-activation-environment | D-Bus 环境更新 | 无 |
+| waybar | 状态栏 | 无 |
+| swaync | 通知中心 | 无 |
+| hyprpaper | 壁纸 | 1秒 |
+| wlsunset | 蓝光过滤 | 2秒 |
+
+#+begin_src lua :tangle hyprland.lua
+hl.on("hyprland.start", function ()
+    hl.exec_cmd("fcitx5 -d")
+    hl.exec_cmd("dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP")
+    hl.exec_cmd("waybar")
+    hl.exec_cmd("swaync")
+    hl.exec_cmd("sleep 1 && hyprpaper")
+    hl.exec_cmd("sleep 2 && wlsunset -l 22.82 -L 108.32 -t 4500 -T 6500")
+end)
+#+end_src
+
+* 工作区
+
+** 显示器分配
+
+工作区与显示器的绑定关系。
+
+| 工作区 | 显示器 | 用途 |
+|--------+--------+------|
+| 1, 2 | eDP-1 | 编码、终端 |
+| 3, 4, 5 | HDMI-A-1 | 浏览器、文档 |
+
+#+begin_src lua :tangle hyprland.lua
+hl.workspace_rule({ workspace = "1", monitor = "eDP-1",    default = true })
+hl.workspace_rule({ workspace = "2", monitor = "eDP-1" })
+hl.workspace_rule({ workspace = "3", monitor = "HDMI-A-1", default = true })
+hl.workspace_rule({ workspace = "4", monitor = "HDMI-A-1" })
+hl.workspace_rule({ workspace = "5", monitor = "HDMI-A-1" })
+#+end_src
+
+** 切换 (Super + 数字 / P / N)
+
+Super + 1-5 切换到指定工作区。
+Super + P/N 在相邻工作区之间切换（支持循环）。
+
+#+begin_src lua :tangle hyprland.lua
+hl.bind(mainMod .. " + 1", hl.dsp.focus({ workspace = "1" }))
+hl.bind(mainMod .. " + 2", hl.dsp.focus({ workspace = "2" }))
+hl.bind(mainMod .. " + 3", hl.dsp.focus({ workspace = "3" }))
+hl.bind(mainMod .. " + 4", hl.dsp.focus({ workspace = "4" }))
+hl.bind(mainMod .. " + 5", hl.dsp.focus({ workspace = "5" }))
+hl.bind(mainMod .. " + P", hl.dsp.focus({ workspace = "r-1" }))
+hl.bind(mainMod .. " + N", hl.dsp.focus({ workspace = "r+1" }))
+#+end_src
+
+** 移动窗口 (Super + Shift + 数字)
+
+将当前窗口移动到指定工作区。
+
+#+begin_src lua :tangle hyprland.lua
+hl.bind(mainMod .. " + SHIFT + 1", hl.dsp.window.move({ workspace = "1" }))
+hl.bind(mainMod .. " + SHIFT + 2", hl.dsp.window.move({ workspace = "2" }))
+hl.bind(mainMod .. " + SHIFT + 3", hl.dsp.window.move({ workspace = "3" }))
+hl.bind(mainMod .. " + SHIFT + 4", hl.dsp.window.move({ workspace = "4" }))
+hl.bind(mainMod .. " + SHIFT + 5", hl.dsp.window.move({ workspace = "5" }))
+#+end_src
+
+* 窗口管理
+
+** 焦点移动 (Vim: H/J/K/L)
+
+使用 Vim 风格的方向键移动焦点。
+
+| 快捷键 | 方向 |
+|--------+------|
+| Super + H | 左 |
+| Super + J | 下 |
+| Super + K | 上 |
+| Super + L | 右 |
+
+#+begin_src lua :tangle hyprland.lua
+hl.bind(mainMod .. " + H", hl.dsp.focus({ direction = "left" }))
+hl.bind(mainMod .. " + L", hl.dsp.focus({ direction = "right" }))
+hl.bind(mainMod .. " + K", hl.dsp.focus({ direction = "up" }))
+hl.bind(mainMod .. " + J", hl.dsp.focus({ direction = "down" }))
+#+end_src
+
+** 窗口位置调整
+
+移动当前窗口到相邻位置。
+
+#+begin_src lua :tangle hyprland.lua
+hl.bind(mainMod .. " + SHIFT + H", hl.dsp.window.move({ direction = "left" }))
+hl.bind(mainMod .. " + SHIFT + L", hl.dsp.window.move({ direction = "right" }))
+hl.bind(mainMod .. " + SHIFT + K", hl.dsp.window.move({ direction = "up" }))
+hl.bind(mainMod .. " + SHIFT + J", hl.dsp.window.move({ direction = "down" }))
+#+end_src
+
+** 鼠标拖拽
+
+Super + 左键拖拽移动窗口，Super + 右键拖拽调整大小。
+
+| 鼠标按钮 | 功能 |
+|----------+------|
+| Super + 左键 (272) | 拖拽移动窗口 |
+| Super + 右键 (273) | 拖拽调整大小 |
+
+#+begin_src lua :tangle hyprland.lua
+hl.bind(mainMod .. " + mouse:272", hl.dsp.window.drag(),   { mouse = true })
+hl.bind(mainMod .. " + mouse:273", hl.dsp.window.resize(), { mouse = true })
+#+end_src
+
+** 全屏 / 关闭
+
+| 快捷键 | 功能 |
+|--------+------|
+| Super + F | 切换全屏 |
+| Super + W | 关闭窗口 |
+
+#+begin_src lua :tangle hyprland.lua
+hl.bind(mainMod .. " + F", hl.dsp.window.fullscreen({ action = "toggle" }))
+hl.bind(mainMod .. " + W", hl.dsp.window.close())
+#+end_src
+
+* 系统控制
+
+** 亮度 / 音量
+
+多媒体键控制亮度和音量。
+
+| 快捷键 | 功能 |
+|--------+------|
+| XF86MonBrightnessUp | 亮度 +5% |
+| XF86MonBrightnessDown | 亮度 -5% |
+| XF86AudioRaiseVolume | 音量 +5% |
+| XF86AudioLowerVolume | 音量 -5% |
+| XF86AudioMute | 静音切换 |
+
+#+begin_src lua :tangle hyprland.lua
+hl.bind("XF86MonBrightnessUp",   hl.dsp.exec_cmd("brightnessctl set +5%"))
+hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("brightnessctl set 5%-"))
+hl.bind("XF86AudioRaiseVolume",  hl.dsp.exec_cmd("pactl set-sink-volume @DEFAULT_SINK@ +5%"))
+hl.bind("XF86AudioLowerVolume",  hl.dsp.exec_cmd("pactl set-sink-volume @DEFAULT_SINK@ -5%"))
+hl.bind("XF86AudioMute",         hl.dsp.exec_cmd("pactl set-sink-mute @DEFAULT_SINK@ toggle"))
+#+end_src
+
+** 通知 / 电源 / 截图 / 输入法
+
+| 快捷键 | 功能 |
+|--------+------|
+| Super + Shift + N | 切换通知中心 |
+| Super + Alt + Space | 电源菜单 |
+| Super + Shift + P | 区域截图 |
+| Ctrl + \ | 切换输入法 |
+
+#+begin_src lua :tangle hyprland.lua
+hl.bind(mainMod .. " + SHIFT + N",     hl.dsp.exec_cmd("swaync-client -t"))
+hl.bind(mainMod .. " + ALT + SPACE",   hl.dsp.exec_cmd("~/.config/hypr/scripts/power-menu.sh"))
+hl.bind(mainMod .. " + SHIFT + P",     hl.dsp.exec_cmd("hyprshot -m region -o $HOME/Pictures/captures"))
+-- fcitx5 输入法切换（Wayland 下 fcitx5 热键不生效，用 Hyprland 绑定）
+hl.bind("CTRL + backslash",            hl.dsp.exec_cmd("fcitx5-remote -t"))
+#+end_src
+
+* 应用快捷键
+
+| 快捷键 | 应用 |
+|--------+------|
+| Super + Return | Ghostty 终端 |
+| Super + Space | Rofi 应用启动器 |
+| Super + B | Firefox 浏览器 |
+| Super + E | Emacs |
+
+#+begin_src lua :tangle hyprland.lua
+hl.bind(mainMod .. " + Return", hl.dsp.exec_cmd("ghostty"))
+hl.bind(mainMod .. " + SPACE",  hl.dsp.exec_cmd("rofi -show drun"))
+hl.bind(mainMod .. " + B",      hl.dsp.exec_cmd("firefox"))
+hl.bind(mainMod .. " + E",      hl.dsp.exec_cmd("emacsclient -c -a 'emacs'"))
+#+end_src
+
+* 布局切换
+
+Super + Tab 在 dwindle / scrolling 布局间循环切换当前工作区。
+
+#+begin_src lua :tangle hyprland.lua
+hl.bind(mainMod .. " + TAB", function ()
+    local layouts  = { "scrolling", "dwindle" }
+    local workspace = hl.get_active_workspace()
+    if not workspace then return end
+
+    local next_layout = layouts[1]
+    for i = 1, #layouts do
+        if layouts[i] == workspace.tiled_layout then
+            next_layout = layouts[(i % #layouts) + 1]
+            break
+        end
+    end
+    hl.workspace_rule({ workspace = tostring(workspace.id), layout = next_layout })
+end)
+#+end_src
+
+* 窗口规则
+
+** fcitx5 输入法候选窗口
+
+fcitx5 的候选窗口需要浮动且置顶显示。
+
+#+begin_src lua :tangle hyprland.lua
+-- fcitx5 候选词窗口：浮动、置顶
+hl.window_rule({ name = "fcitx-float", match = { class = "^(fcitx|Fcitx|fcitx5)$" }, float = true })
+hl.window_rule({ name = "fcitx-pin",   match = { class = "^(fcitx|Fcitx|fcitx5)$" }, pin = true })
+#+end_src
+
+** 蓝牙管理器
+
+蓝牙管理器窗口需要居中浮动显示。
+
+#+begin_src lua :tangle hyprland.lua
+hl.window_rule({ name = "bluetooth-float",  match = { class = "^(bluetooth-manager)$" }, float = true })
+hl.window_rule({ name = "bluetooth-center", match = { class = "^(bluetooth-manager)$" }, center = true })
+#+end_src
+
+* hyprpaper 配置
+
+壁纸管理器配置。支持多显示器不同壁纸。
+
+| 参数 | 作用 | 值 |
+|------+------+-----|
+| ipc | IPC 控制 | true |
+| splash | 启动画面 | false |
+
+#+begin_src conf :tangle hyprpaper.conf
+ipc = true
+splash = false
+
+preload = /home/singdile/Pictures/wallpapers/nord/a_logo_with_white_text.png
+
+wallpaper {
+    monitor = eDP-1
+    path = /home/singdile/Pictures/wallpapers/nord/a_cat_walking_on_a_hill.png
+    fit_mode = cover
+}
+
+wallpaper {
+    monitor = HDMI-A-1
+    path = /home/singdile/Pictures/wallpapers/painting/a_painting_of_flowers_and_a_glass_of_wine.jpg
+    fit_mode = cover
+}
+#+end_src
+
+* hyprlock 配置
+
+锁屏配置。使用 JetBrainsMono Nerd Font 和 Nord 配色。
+
+| 参数 | 作用 | 值 |
+|------+------+-----|
+| grace | 宽限时间 | 1500ms |
+| no_fade_in | 淡入效果 | false |
+| disable_loading_message | 加载提示 | false |
+
+#+begin_src conf :tangle hyprlock.conf
+general {
+    grace = 1500
+    no_fade_in = false
+    disable_loading_message = false
+}
+
+background {
+    color = rgb(26, 27, 38)
+}
+
+input-field {
+    font_family = JetBrainsMono Nerd Font
+    font_size = 22
+    fail_color = rgb(245,85,100)
+    check_color = rgb(138,212,113)
+    caps_lock_color = rgb(245,200,100)
+    fade_on_empty = true
+    fade_timeout = 1200
+    round_corner_radius = 20
+    thickness = 4
+    halign = center
+    valign = center
+    position = 0, 0
+    placeholder_text = <i>Enter password...</i>
+    dots_centered = true
+    dots_size = 14
+    dots_spacing = 10
+    dots_rounding = 12
+    inner_color = rgba(26, 27, 38, 0.85)
+    outer_color = rgba(138, 212, 113, 0.4)
+    outline_thickness = 3
+}
+
+label {
+    text = " Secure Session"
+    font_family = JetBrainsMono Nerd Font
+    font_size = 18
+    color = rgba(166, 227, 161, 0.95)
+    halign = center
+    valign = top
+    position = 0, 80
+}
+#+end_src
+
+* 导出
+
+执行此代码块导出所有配置文件。
+
+#+begin_src emacs-lisp :results silent
+(org-babel-tangle)
+(message "OK")
+#+end_src
+
+# Local Variables:
+# org-confirm-babel-evaluate: nil
+# End:
