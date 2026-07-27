@@ -447,8 +447,36 @@ protobuf-ts-mode（tree-sitter 语法高亮）+ buf format（保存时格式化�
 *** 前置依赖
 
 - MELPA 包： =M-x package-install RET protobuf-ts-mode RET=（已安装）
-- tree-sitter 语法： =M-x treesit-install-language-grammar RET proto RET=（已安装）
+- tree-sitter 语法： =C-x v + 时自动安装，或手动克隆编译：
+     =git clone https://github.com/coder3101/tree-sitter-proto=
+     =cd tree-sitter-proto && make=
+     =cp libtree-sitter-proto.so ~/.emacs.d/tree-sitter/=
 - buf 二进制： =go install github.com/bufbuild/buf/cmd/buf@latest= （=mise= 已托管）
+
+*** 故障排查
+
+如果 =protobuf-ts-mode= 安装后缺少 =.el= 文件（包目录中只有
+=-pkg.el= 和 =-autoloads.el=），原因通常是代理导致下载返回空响应：
+
+1. 确认代理端口： =ss -tlnp | grep mihomo=
+2. 在 =~/.emacs.d/lisp/bootstrap.el= 中更新 =url-proxy-services= 的端口号
+3. 将 =melpa.org= / =elpa.gnu.org= / =elpa.nongnu.org= 加入 =no_proxy=
+4. 验证： =M-: (url-insert-file-contents
+   "https://melpa.org/packages/protobuf-ts-mode-20230728.1747.tar")=
+   看是否返回 10240 bytes
+5. 修复后： =M-x package-delete RET protobuf-ts-mode RET= 然后重新安装
+
+验证 protobuf 模式是否正常工作的最快方法：
+
+#+begin_src emacs-lisp
+(require 'protobuf-ts-mode)
+(with-temp-buffer
+  (insert "syntax = \"proto3\";\nmessage Foo { string name = 1; }")
+  (protobuf-ts-mode)
+  (message "Parser: %s" (treesit-parser-list)))
+#+end_src
+
+预期输出： =(#<treesit-parser for proto>)=
 
 *** protobuf-ts-mode + buf format
 

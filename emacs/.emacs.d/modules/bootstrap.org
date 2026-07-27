@@ -27,14 +27,19 @@ Emacs 内置了 =package.el=，只需指定从哪里下载包。
 (require 'package)
 (setq package-check-signature nil)  ; 跳过签名验证
 
-;; Emacs 30 tar-mode 兼容：用系统 tar 命令代替内置 tar-mode
+;; Emacs 30 内置 tar-mode 解包 protobuf-ts-mode 时有断言失败 bug，
+;; 故使用系统 tar 命令代替内置 tar-mode 解包
 (defun my/tar-untar-buffer (dir)
   (let ((tar-file (make-temp-file "emacs-pkg-" nil ".tar"))
         (default-directory (expand-file-name dir package-user-dir)))
     (write-region (point-min) (point-max) tar-file nil 'silent)
     (make-directory default-directory t)
     (with-temp-buffer
-      (call-process "tar" nil t nil "xf" tar-file "--strip-components=1" "-C" default-directory)
+      (unless (zerop (call-process "tar" nil '(t nil) nil
+                                   "xf" tar-file
+                                   "--strip-components=1"
+                                   "-C" default-directory))
+        (error "tar extraction failed: %s" (buffer-string)))
       (delete-file tar-file))))
 (defalias 'package-untar-buffer #'my/tar-untar-buffer)
 
@@ -113,17 +118,22 @@ Emacs 的 =M-x customize= 界面会把设置自动写入 =custom-file=。
 
 Emacs 的网络请求（如下载包、eglot 连接服务器）可能需要通过代理访问。
 
+正确端口查询： =ss -tlnp | grep mihomo=
+mihomo 的 =port= 是 HTTP 代理端口，=mixed-port= 不支持 Emacs url.el 的 CONNECT 方式。
+
 | 参数 | 值 | 说明 |
 |------|-----|------|
-| http | 127.0.0.1:7890 | HTTP 代理地址 |
-| https | 127.0.0.1:7890 | HTTPS 代理地址 |
-| no_proxy | .cn, localhost | 不走代理的地址 |
+| http | 127.0.0.1:7899 | HTTP 代理端口（=port=，非 =mixed-port=） |
+| https | 127.0.0.1:7899 | 同上 |
+| no_proxy | .cn, localhost, melpa.org, elpa.* | 包下载走代理可能导致空响应，需排除 |
+
+调试方法： =M-: (url-insert-file-contents "https://melpa.org/packages/...")= 看返回字节数是否正常。
 
 #+begin_src emacs-lisp
 (use-package url
   :config
   (setq url-proxy-services
-        '(("http" . "127.0.0.1:7890")
-          ("https" . "127.0.0.1:7890")
-          ("no_proxy" . "^.*\\.cn\\|localhost\\|127\\.0\\.0\\.1"))))
+       '(("http" . "127.0.0.1:7899")
+          ("https" . "127.0.0.1:7899")
+          ("no_proxy" . "^.*\\.cn\\|localhost\\|127\\.0\\.0\\.1\\|melpa\\.org\\|elpa\\.gnu\\.org\\|elpa\\.nongnu\\.org"))))
 #+end_src
