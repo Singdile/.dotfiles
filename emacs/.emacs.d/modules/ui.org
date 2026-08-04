@@ -74,3 +74,47 @@ Emacs 默认显示工具栏、菜单栏、滚动条——这些在 GUI 下可以
                       :foreground "#7a7a7a"
                       :height 0.9))
 #+end_src
+
+** 弹出窗口管理（Popper）
+
+Emacs 里的帮助（=C-h f=）、编译输出、终端这类"临时性"窗口，
+平时用 =C-x 1= 关掉又舍不得，留着又占地方。
+=popper= （karthink 出品，eglot 作者）把这些 buffer 统一标记为 popup，
+用快捷键随时召唤、隐藏、循环切换，不影响主窗口布局。
+
+**核心概念：**
+
+- =popper-reference-buffers= ：定义哪些 buffer 算 popup（按 buffer 名正则 / 模式名匹配）
+- =popper-mode= ：全局启用后自动跟踪 popup 窗口，并记录每个 popup 对应的工作窗口
+- =popper-echo-mode= ：mode line 显示当前分组里有多少个 popup
+
+**主要命令（暂未绑定快捷键，可用 =M-x= 调用，之后再加）：**
+
+| 命令 | 作用 |
+|------+------|
+| =popper-toggle= | 召唤/隐藏最近一个 popup |
+| =popper-cycle= | 循环切换所有 popup（配合 echo 提示）|
+| =popper-toggle-type= | popup 与普通窗口之间切换 |
+| =popper-close-latest= | 关闭最近一个 popup，不重新召唤 |
+
+**和现有配置的关系：**
+
+=C-h q= 目前绑定的是 =my/close-help-window= （editing.org 里 helpful 一节），
+只关闭帮助窗口、不动其他窗口。Popper 的职责与之有重叠：
+将来绑定 =popper-toggle= 后可以替代它，这里暂时保留 =C-h q= 。
+
+#+begin_src emacs-lisp
+(use-package popper
+  :ensure t
+  :init
+  ;; 哪些 buffer 视为 popup：按名字正则 / 模式名匹配
+  (setq popper-reference-buffers
+        '("\\*Messages\\*"         ; 消息日志
+          "Output\\*$"              ; eglot/异步输出
+          help-mode                 ; C-h 帮助
+          helpful-mode              ; helpful 帮助
+          compilation-mode          ; 编译/诊断输出
+          "\\*eldoc\\*"))           ; eldoc 文档弹出
+  (popper-mode +1)                  ; 全局启用 popup 跟踪
+  (popper-echo-mode +1))            ; mode line 显示 popup 数量
+#+end_src

@@ -88,6 +88,13 @@
 (load-module "dired")
 #+end_src
 
+* Olivetti
+   文本居中显示，优化 Org/Markdown 阅读体验
+
+#+begin_src emacs-lisp
+(load-module "olivetti")
+#+end_src
+
 * Misc
   recentf、savehist、save-place 等杂项
 

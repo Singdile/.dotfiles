@@ -12,13 +12,14 @@
 
 选择 Vertico + Corfu + Orderless 路线，各司其职：
 
-| 包             | 职责                         | 工作位置                      |
-|----------------+------------------------------+------------------------------|
-| vertico        | 竖直展示补全候选               | minibuffer (M-x、C-x C-f 等) |
-| marginalia     | 给候选加注释(文件大小,函数签名等) | minibuffer(vertico 的好搭档)  |
-| orderless      | 灵活的匹配规则(支持空格分词,正则) | 全局生效                      |
-| corfu          | 代码编辑器内的弹出补全框         | buffer 内(光标处)             |
-| corfu-terminal | 终端 Emacs 下的 corfu 适配     | buffer 内(终端专用)           |
+| 包             | 职责                              | 工作位置                      |
+|----------------+-----------------------------------+------------------------------|
+| vertico        | 竖直展示补全候选                    | minibuffer (M-x、C-x C-f 等) |
+| marginalia     | 给候选加注释(文件大小,函数签名等)      | minibuffer(vertico 的好搭档)  |
+| orderless      | 灵活的匹配规则(支持空格分词,正则)      | 全局生效                      |
+| corfu          | 代码编辑器内的弹出补全框              | buffer 内(光标处)             |
+| corfu-terminal | 终端 Emacs 下的 corfu 适配          | buffer 内(终端专用)           |
+| embark         | 对候选执行额外操作(删除/重命名/查看文档) | minibuffer/buffer 内         |
 
 *** Vertico：竖直 minibuffer 补全
 
@@ -108,35 +109,36 @@ vertico 不会报错而是灰显输入，让你直接回车创建新文件。
 候选列表由 vertico 展示，注释由 marginalia 追加。
 三件工具无缝协作。
 
-**=consult-customize=** 让某些命令预置参数。
+**consult-customize** 让某些命令预置参数。
 这里让 =consult-buffer= / =consult-buffer-other-window=
 在预览时忽略纯概念 buffer（=*= 开头的，如 =*Messages*=）。
 
 #+begin_src emacs-lisp
-(use-package consult
-  :ensure t
-  ;; 用 consult 命令替换原生命令的快捷键
-  :bind (("C-x b" . consult-buffer)        ; 切换 buffer，带预览
-         ("M-g g" . consult-goto-line)     ; 跳转到行，带预览
-         ("M-g M-g" . consult-goto-line)   ; 同上（备用）
-         ;; 在 search-map 下追加（M-s 前缀）
-         :map search-map
-         (("l" . consult-line)             ; M-s l：竖直列表搜索当前文件
-          ("r" . consult-ripgrep)          ; M-s r：项目内递归搜索
-          ("f" . consult-find))             ; M-s f：按文件名搜索
-         ;; minibuffer 内：C-r 搜索历史（和 shell 习惯一致）
-         :map minibuffer-local-map
-         (("C-r" . consult-history)))       ; 从历史中搜索
-  :custom
-  ;; 预览相关
-  (consult-preview-key 'any)               ; 任何键都触发预览（默认只部分键）
-  ;; buffer 预览时忽略 * 开头的特殊 buffer
-  (consult-buffer-filter
-   '("\\` " "\\`\\*Customize" "\\`\\*Messages" "\\`\\*scratch"))
-  :config
-  ;; 预览时的样式
-  (setq consult-preview-allowed-hooks '(global-font-lock-mode-hook
-                                        rainbow-delimiters-mode-hook)))
+  (use-package consult
+    :ensure t
+    ;; 用 consult 命令替换原生命令的快捷键
+    :bind (("C-x b" . consult-buffer)        ; 切换 buffer，带预览
+           ("M-g g" . consult-goto-line)     ; 跳转到行，带预览
+           ("M-g M-g" . consult-goto-line)   ; 同上（备用）
+  	 ("M-s i" . consult-imenu) 
+           ;; 在 search-map 下追加（M-s 前缀）
+           :map search-map
+           (("l" . consult-line)             ; M-s l：竖直列表搜索当前文件
+            ("r" . consult-ripgrep)          ; M-s r：项目内递归搜索
+            ("f" . consult-find))             ; M-s f：按文件名搜索
+           ;; minibuffer 内：C-r 搜索历史（和 shell 习惯一致）
+           :map minibuffer-local-map
+           (("C-r" . consult-history)))       ; 从历史中搜索
+    :custom
+    ;; 预览相关
+    (consult-preview-key 'any)               ; 任何键都触发预览（默认只部分键）
+    ;; buffer 预览时忽略 * 开头的特殊 buffer
+    (consult-buffer-filter
+     '("\\` " "\\`\\*Customize" "\\`\\*Messages" "\\`\\*scratch"))
+    :config
+    ;; 预览时的样式
+    (setq consult-preview-allowed-hooks '(global-font-lock-mode-hook
+                                          rainbow-delimiters-mode-hook)))
 #+end_src
 
 *** Corfu：行内弹出补全
@@ -185,7 +187,8 @@ Emacs 内置了 =electric-pair-mode= ，输入左括号自动补右括号。
 如果需要对 HTML/LaTeX 等标记语言的结构化编辑，再用 =smartparens=。
 
 #+begin_src emacs-lisp
-;; TODO: electric-pair-mode 或 smartparens
+   ;; TODO: electric-pair-mode 或 smartparens
+ (electric-pair-mode t)
 #+end_src
 
 ** which-key：快捷键提示
@@ -263,4 +266,39 @@ Emacs 内置了 =electric-pair-mode= ，输入左括号自动补右括号。
   :custom
   (rainbow-delimiters-max-face-count 9)  ; 9 层嵌套各有不同颜色
   :hook (prog-mode . rainbow-delimiters-mode))
+#+end_src
+
+** Embark：对 minibuffer 候选执行额外操作
+
+在 minibuffer 中对选中结果执行额外操作（删除文件、查看文档、重命名等），
+类似在搜索结果上右键弹出菜单。属于 Vertico 生态的最后一块拼图。
+
+核心快捷键：
+
+| 快捷键 | 命令 | 说明 |
+|--------|------|------|
+| =C-.= | =embark-act= | minibuffer 或 buffer 中弹出操作菜单 |
+| =C-;= | =embark-dwim= | 对当前目标执行默认操作 |
+| =C-h B= | =embark-bindings= | 查看所有快捷键绑定（替代 =C-h b=）|
+
+#+begin_src emacs-lisp
+(use-package embark
+  :ensure t
+  :bind
+   (("C-." . embark-act)
+    ("M-." . embark-dwim)
+   ("C-h B" . embark-bindings))
+  :init
+  (setq prefix-help-command #'embark-prefix-help-command)
+  :config
+  (add-to-list 'display-buffer-alist
+               '("\\`\\*Embark Collect \\(Live\\|Completions\\)\\*"
+                 nil
+                 (window-parameters (mode-line-format . none)))))
+
+(use-package embark-consult
+  :ensure t
+  :after consult
+  :hook
+  (embark-collect-mode . consult-preview-at-point-mode))
 #+end_src

@@ -93,15 +93,15 @@ Go 的开发栈：go-ts-mode（语法高亮）+ eglot + gopls（LSP）+ goimport
   :custom
   (go-ts-mode-indent-offset 4))
 #+end_src
-*** 保存时格式化和整理 import
+*** 手动格式化和整理 import
 #+begin_src emacs-lisp
-;; goimports：保存时格式化 + import 整理
+;; goimports：手动格式化（C-c C-f），不再绑定保存
 (use-package reformatter
   :after go-ts-mode
   :config
   (reformatter-define go-format
     :program "goimports")
-  (add-hook 'go-ts-mode-hook #'go-format-on-save-mode))
+  (define-key go-ts-mode-map (kbd "C-c C-f") #'go-format-buffer))
 #+end_src
 
 *** 测试支持（gotest）
@@ -376,14 +376,14 @@ Emacs 30 内置 =yaml-ts-mode=。tree-sitter 语法库需手动安装，
   :custom
   (yaml-mode-indent-offset 2))
 
-;; yamlfmt：保存时格式化
+;; yamlfmt：手动格式化（C-c C-f），不再绑定保存
 (use-package reformatter
   :after yaml-mode
   :config
   (reformatter-define yaml-format
     :program "yamlfmt"
     :args '("-"))
-  (add-hook 'yaml-mode-hook 'yaml-format-on-save-mode))
+  (define-key yaml-mode-map (kbd "C-c C-f") #'yaml-format-buffer))
 #+end_src
 
 ** SQL
@@ -429,7 +429,6 @@ LSP 服务器推荐： =sudo pacman -S lua-language-server=
   (markdown-hide-markup t)
   :config
   (defun my/markdown-mode-setup ()
-    (visual-line-mode 1)
     (variable-pitch-mode 1)
     (setq-local line-spacing 0.3))
   (dolist (pair '((markdown-header-face-1 . 1.4)
@@ -493,17 +492,24 @@ protobuf-ts-mode（tree-sitter 语法高亮）+ buf format（保存时格式化�
   :custom
   (protobuf-ts-mode-indent-offset 2))
 
-;; buf format 保存后格式化（buf format 不支持 stdin，故不用 reformatter）
+;; buf format 手动格式化（C-c C-f）（buf format 不支持 stdin，故不用 reformatter）
 ;; 文件写入磁盘后，buf format -w 改写文件，再 revert-buffer 加载到 buffer
+;; revert-buffer 会把光标甩到行首，格式化后用行+列恢复原位
 (defun my/protobuf-format ()
-  "Use buf format to format current proto buffer after save."
+  "Use buf format to format current proto buffer."
   (when-let ((file (buffer-file-name)))
-    (let ((default-directory (file-name-directory file)))
+    (let ((default-directory (file-name-directory file))
+          (line (line-number-at-pos))
+          (col (current-column)))
       (when (zerop (call-process "buf" nil '(nil "/dev/null") nil
                                  "format" "-w" file))
-        (revert-buffer t t t)))))
+        (let ((inhibit-message t))
+          (revert-buffer t t t)
+          (goto-char (point-min))
+          (forward-line (1- line))
+          (move-to-column col))))))
 
 (add-hook 'protobuf-ts-mode-hook
           (lambda ()
-            (add-hook 'after-save-hook #'my/protobuf-format nil t)))
+            (local-set-key (kbd "C-c C-f") #'my/protobuf-format)))
 #+end_src

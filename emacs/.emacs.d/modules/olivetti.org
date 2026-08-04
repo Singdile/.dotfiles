@@ -1,0 +1,23 @@
+#+title: olivetti
+#+property: header-args:emacs-lisp  :tangle ../lisp/olivetti.el :results silent
+
+* Olivetti（文本居中显示）
+:PROPERTIES:
+:CUSTOM_ID: olivetti
+:END:
+
+Olivetti 通过自动平衡窗口左右边距，将文本正文居中显示，提供舒适的阅读和写作环境。
+适用于 Org-mode、Markdown 等文档模式。
+
+- =olivetti-body-width= 控制文本宽度（120 列），可用 C-c } / C-c { 实时调整
+- 自动启用 =visual-line-mode= 折行显示，无需手动设置
+
+#+begin_src emacs-lisp
+(use-package olivetti
+  :ensure t
+  :custom
+  (olivetti-body-width 120)
+  :config
+  (add-hook 'org-mode-hook #'olivetti-mode)
+  (add-hook 'markdown-mode-hook #'olivetti-mode))
+#+end_src

@@ -146,7 +146,6 @@
 (defun my/org-mode-setup ()
   (org-modern-mode 1)
   (valign-mode 1)
-  (visual-line-mode 1)
   (adaptive-wrap-prefix-mode 1)
   (setq-local line-spacing 0.3))
 
